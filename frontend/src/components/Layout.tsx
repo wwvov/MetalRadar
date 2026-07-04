@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { cn } from '@/lib/utils'
+import { useFollows } from '@/hooks/useFollows'
 import {
   Newspaper,
   Star,
@@ -16,6 +17,9 @@ const NAV_ITEMS = [
 ]
 
 export function Layout() {
+  // 全局加载关注列表，确保所有页面都能获取到最新的 follows 数据
+  useFollows()
+
   return (
     <div className="flex h-screen bg-green-50/30">
       {/* 左侧导航 — 白色背景 + 深绿色强调 */}

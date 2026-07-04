@@ -14,8 +14,8 @@ export interface CompanySearchResult {
 export interface CompanyMaterial {
   id?: number
   material_name: string
-  cost_pct: number
-  source: 'report' | 'inferred'
+  cost_pct: number | null
+  source: 'report' | 'inferred' | 'manual'
   direction: 'negative' | 'positive'
   contract: string
 }
@@ -30,18 +30,26 @@ export interface CompanyDetail extends CompanyBasic {
   short_name: string
   business_desc: string
   portrait: CompanyPortrait
-  // 财报摘要
   financial_summary?: FinancialSummary
+  portrait_updated_at?: string
 }
 
 export interface FinancialSummary {
   report_period: string
-  revenue: number
-  cost: number
-  gross_margin: number
-  direct_material_pct: number
-  direct_labor_pct: number
-  manufacturing_pct: number
+  revenue: number | null
+  cost: number | null
+  gross_margin: number | null
+  direct_material_pct: number | null
+  direct_labor_pct: number | null
+  manufacturing_pct: number | null
+}
+
+// 画像更新请求
+export interface PortraitUpdatePayload {
+  position?: string
+  position_detail?: string
+  business_desc?: string
+  materials?: CompanyMaterial[]
 }
 
 // 股票K线

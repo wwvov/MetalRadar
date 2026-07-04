@@ -57,7 +57,7 @@ export function ShmetBlock() {
         </CardTitle>
       </CardHeader>
       <CardContent className="pt-0">
-        <Tabs value={metalTab} onValueChange={setMetalTab}>
+        <Tabs value={metalTab} onValueChange={setMetalTab} className="flex-col">
           <TabsList className="w-full justify-start overflow-x-auto bg-green-50/50 p-1 rounded-lg">
             {SHMET_TABS.map((tab) => (
               <TabsTrigger

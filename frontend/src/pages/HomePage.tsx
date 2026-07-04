@@ -254,7 +254,7 @@ export default function HomePage() {
 
       {/* ===== 5. Tab 栏 + 筛选项 + 新闻列表 ===== */}
       <div className="px-6 pt-5 flex-1">
-        <Tabs value={activeTab} onValueChange={handleTabChange}>
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="flex-col">
           {/* Tab 栏 (sticky) */}
           <div className="sticky top-[57px] z-10 bg-white border-b border-slate-200">
             <div className="flex items-center justify-between">

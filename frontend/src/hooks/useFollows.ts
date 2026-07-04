@@ -19,6 +19,8 @@ export function useFollows() {
     mutationFn: userService.followCompany,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['user-follows'] })
+      // 关注变更后刷新所有新闻列表，使"关注公司"Tab 等及时更新
+      queryClient.invalidateQueries({ queryKey: ['news'] })
     },
   })
 
@@ -26,6 +28,7 @@ export function useFollows() {
     mutationFn: userService.unfollowCompany,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['user-follows'] })
+      queryClient.invalidateQueries({ queryKey: ['news'] })
     },
   })
 

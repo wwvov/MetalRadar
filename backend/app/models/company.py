@@ -1,6 +1,6 @@
 """公司信息模型 — 对齐 data-model.md"""
 
-from sqlalchemy import Column, String, Text, Integer, Numeric, ForeignKey, JSON
+from sqlalchemy import Column, String, Text, Integer, Numeric, Boolean, DateTime, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 
@@ -15,6 +15,8 @@ class Company(Base):
     business_desc = Column(Text, comment="主营业务描述")
     position = Column(String(20), comment="产业链位置: up/mid/down")
     position_detail = Column(String(100), comment="细分环节描述")
+    portrait_generated = Column(Boolean, default=False, comment="画像是否已由AI生成")
+    portrait_updated_at = Column(DateTime, comment="画像最后更新时间")
 
     # 关系
     materials = relationship("CompanyMaterial", back_populates="company", cascade="all, delete-orphan")
