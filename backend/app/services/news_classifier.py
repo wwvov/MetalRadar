@@ -58,14 +58,20 @@ CLASSIFY_SYSTEM_PROMPT = """你是一位资深的中国金属/大宗商品行业
 - geopolitical: 地缘政治/贸易争端/制裁/战争/选举
 
 ## 分类规则
-1. **is_relevant**: 只要新闻涉及上述任何金属品种/能源/大宗商品，或可能影响大宗商品供需/价格的宏观政策，就设为 true。纯股市涨跌、个股推荐、不涉及大宗商品的行业新闻设为 false。
+1. **is_relevant**: 新闻标题或摘要中必须**明确出现**上述清单中的具体金属/能源/大宗商品品种名称，才设为 true。
+   以下类型一律设为 false（即使可能间接影响大宗商品）：
+   - 宏观政策类：降准降息(未提及具体品种)、GDP/PMI/CPI/社融数据、美联储/欧央行决议
+   - 地缘政治类：国际冲突/选举/贸易摩擦（未提及具体品种影响）
+   - 股市类：A股大盘涨跌、个股推荐、财报（未涉及大宗商品业务）
+   - 产业类：不涉及上述品种清单的行业新闻
 2. **metal_entities**: 从新闻中提取涉及的金属品种名称（必须是上述清单中的品种，不要编造）。无则空数组。
+   **关键约束**: 如果 metal_entities 为空数组，则 is_relevant 必须为 false，relevance_level 必须为 "gray"。
 3. **company_entities**: 提取新闻中明确提到的A股上市公司名称。无则空数组。
 4. **relevance_level**:
-   - "red" = 同时涉及金属品种+具体公司
-   - "yellow" = 仅涉及金属品种
-   - "blue" = 仅涉及公司（不涉及金属品种）
-   - "gray" = 与大宗商品无关的宏观/政策新闻
+   - "red" = 同时涉及金属品种+具体公司（metal_entities 和 company_entities 都非空）
+   - "yellow" = 仅涉及金属品种（metal_entities 非空，company_entities 为空）
+   - "blue" = 仅涉及公司（metal_entities 为空，company_entities 非空）
+   - "gray" = 不涉及任何金属品种和公司（metal_entities 和 company_entities 都为空）
 5. **emotion**: 对金属品种的影响方向
    - "positive" = 利多(供应减少/需求增加/政策利好/价格上涨)
    - "negative" = 利空(供应增加/需求减少/政策利空/价格下跌)
@@ -98,6 +104,8 @@ CLASSIFY_SYSTEM_PROMPT = """你是一位资深的中国金属/大宗商品行业
 - 输出纯 JSON 对象（用 "results" 键包裹数组），不要用 ```json``` 包裹
 - metal_entities 中的品种名称必须使用上述清单中的标准名称
 - 不确定的字段用空数组/空字符串/neutral，不要编造
+- **一致性校验**: metal_entities 和 company_entities 都为空时，is_relevant 必须为 false，relevance_level 必须为 "gray"，emotion 必须为 "neutral"
+- **品种粒度**: 优先用最细粒度的品种名（如"碳酸锂"优于"锂"），但必须是清单中的标准名称
 """
 
 

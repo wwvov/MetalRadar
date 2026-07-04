@@ -16,6 +16,7 @@ import {
 import { cn } from '@/lib/utils'
 import { useNews } from '@/hooks/useNews'
 import { useNewsRefresh } from '@/hooks/useNewsRefresh'
+import { useCompanyDetails } from '@/hooks/useCompany'
 import { useWatchlist } from '@/providers'
 import api from '@/services/api'
 import { newsService } from '@/services/newsService'
@@ -50,6 +51,8 @@ export default function HomePage() {
   // 数据查询
   const macroQuery = useNews('macro_panel')
   const mainQuery = useNews(activeTab)
+  // 批量获取所有关注公司的完整画像（含 materials）
+  const companyDetails = useCompanyDetails(follows.map((f) => f.id))
 
   // 新闻刷新管道（akshare → LLM分类）
   const newsRefresh = useNewsRefresh(() => {
@@ -178,17 +181,49 @@ export default function HomePage() {
     ).length
   }, [mainQuery.data])
 
-  // 从关注公司提取可用品种列表（用于敏感品种筛选条）
+  // 从关注公司的画像材料中提取可用品种列表（用于敏感品种筛选条）
   const availableMetals = useMemo(() => {
-    const metals = new Map<string, number>() // metal -> count
+    // 1. 从所有关注公司的 portrait.materials 中收集品种名称
+    const followedMaterials = new Set<string>()
+    companyDetails.data.forEach((detail) => {
+      (detail.portrait?.materials || []).forEach((m) => {
+        if (m.material_name) {
+          followedMaterials.add(m.material_name)
+        }
+      })
+    })
+
+    if (followedMaterials.size === 0) return []
+
+    // 2. 统计每个品种在当前新闻列表中的出现次数
+    const metals = new Map<string, number>()
     const allNews = mainQuery.data?.news || []
     allNews.forEach((n) => {
       (n.metal_entities || []).forEach((m) => {
-        metals.set(m, (metals.get(m) || 0) + 1)
+        if (followedMaterials.has(m)) {
+          metals.set(m, (metals.get(m) || 0) + 1)
+        }
       })
     })
+
+    // 3. 补充有画像但暂无新闻的品种（count=0，保留可见性）
+    followedMaterials.forEach((m) => {
+      if (!metals.has(m)) {
+        metals.set(m, 0)
+      }
+    })
+
     return [...metals.entries()].sort((a, b) => b[1] - a[1])
-  }, [mainQuery.data])
+  }, [mainQuery.data, companyDetails.data])
+
+  // 敏感品种 Tab 匹配总数
+  const sensitiveMetalTotal = useMemo(() => {
+    const followedMaterials = new Set(availableMetals.map(([m]) => m))
+    if (followedMaterials.size === 0) return 0
+    return (mainQuery.data?.news || []).filter((n) =>
+      (n.metal_entities || []).some((m) => followedMaterials.has(m))
+    ).length
+  }, [mainQuery.data, availableMetals])
 
   // 关注公司及其新闻计数
   const companyCounts = useMemo(() => {
@@ -433,7 +468,7 @@ export default function HomePage() {
                   )}
                   onClick={() => setMetalFilter(null)}
                 >
-                  全部 ({mainQuery.data?.news?.filter(n => (n.metal_entities || []).length > 0).length || 0})
+                  全部 ({sensitiveMetalTotal})
                 </Button>
                 {availableMetals.map(([metal, count]) => (
                   <Button

@@ -1,8 +1,9 @@
 """新闻服务 — 聚合、过滤、关联度计算"""
 
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, and_, func
 from app.models.news import News
+from app.models.company import CompanyMaterial
 from app.models.user import UserFollow, UserFavorite, UserRead
 from app.schemas.news import NewsItem, NewsListResponse
 
@@ -50,7 +51,6 @@ def get_news_list(
         query = query.filter(News.source != SHMET_SOURCE)
         query = query.filter(News.is_relevant == True)
         # 排除含公司或金属实体的行业新闻
-        from sqlalchemy import and_, func
         query = query.filter(
             or_(
                 News.company_entities == None,
@@ -91,7 +91,26 @@ def get_news_list(
         query = query.filter(or_(*conditions))
 
     elif tab == "sensitive_metals":
-        query = query.filter(News.metal_entities.isnot(None))
+        # 获取关注公司的原材料品种，仅展示与用户关注公司相关的品种新闻
+        followed_codes = _get_followed_codes(db, user_id)
+        if not followed_codes:
+            return NewsListResponse(news=[], total=0)
+
+        material_rows = (
+            db.query(CompanyMaterial.material_name)
+            .filter(CompanyMaterial.company_id.in_(followed_codes))
+            .distinct()
+            .all()
+        )
+        material_names = [m[0] for m in material_rows]
+
+        if not material_names:
+            return NewsListResponse(news=[], total=0)
+
+        # 仅返回 metal_entities 非空 且 匹配关注品种的新闻
+        query = query.filter(func.json_array_length(News.metal_entities) > 0)
+        conditions = [News.metal_entities.contains([m]) for m in material_names]
+        query = query.filter(or_(*conditions))
         query = query.filter(News.is_relevant == True)
 
     elif tab == "macro":
