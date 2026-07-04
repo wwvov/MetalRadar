@@ -1,10 +1,15 @@
 """新闻相关 API — 对齐 api-spec.md"""
 
-from fastapi import APIRouter, Depends, Query
+import logging
+from fastapi import APIRouter, Depends, Query, BackgroundTasks
 from sqlalchemy.orm import Session
-from app.core.database import get_db
+from app.core.database import get_db, SessionLocal
 from app.services import news_service
+from app.services.news_fetcher import fetch_all_news, sync_news_to_db
+from app.services.news_classifier import classify_news_batch
 from app.schemas.news import NewsListResponse, FavoriteRequest
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/news", tags=["新闻"])
 
@@ -78,3 +83,89 @@ def read_all_news(
     if news_ids:
         news_service.mark_all_read(db=db, user_id=DEFAULT_USER, news_ids=news_ids)
     return {"ok": True, "count": len(news_ids)}
+
+
+@router.post("/fetch")
+def fetch_news(
+    force: bool = Query(False, description="强制刷新，跳过缓存"),
+    db: Session = Depends(get_db),
+):
+    """从 akshare 获取最新新闻（多源聚合 + 文件缓存 + 入库）"""
+    try:
+        raw_items = fetch_all_news(force=force)
+        result = sync_news_to_db(db, raw_items)
+        return {
+            "ok": True,
+            **result,
+            "sources": list(set(item["source"] for item in raw_items)),
+        }
+    except Exception as e:
+        logger.error(f"新闻抓取失败: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/classify")
+def classify_news(
+    limit: int = Query(50, ge=1, le=100, description="最多处理多少条未分类新闻"),
+    db: Session = Depends(get_db),
+):
+    """使用 LLM 对未分类新闻进行智能标注（品种/公司/情绪/事件类型）"""
+    try:
+        result = classify_news_batch(db, limit=limit)
+        return {"ok": True, **result}
+    except Exception as e:
+        logger.error(f"新闻分类失败: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+# 刷新任务状态
+_refresh_status: dict = {"running": False, "message": "", "result": None}
+
+
+def _run_refresh_pipeline():
+    """后台执行完整刷新管道"""
+    global _refresh_status
+    _refresh_status = {"running": True, "message": "开始抓取新闻...", "result": None}
+    db = SessionLocal()
+    try:
+        # Step 1: 抓取
+        _refresh_status["message"] = "正在从 akshare 获取新闻..."
+        raw_items = fetch_all_news(force=True)
+        fetch_result = sync_news_to_db(db, raw_items)
+        _refresh_status["message"] = f"新闻抓取完成: 新增 {fetch_result['inserted']} 条"
+
+        # Step 2: LLM 分类
+        _refresh_status["message"] = "正在使用 AI 智能分类新闻..."
+        classify_result = classify_news_batch(db, limit=100)
+        _refresh_status["message"] = f"分类完成: {classify_result['classified']} 条"
+
+        _refresh_status = {
+            "running": False,
+            "message": "刷新完成",
+            "result": {
+                "fetch": fetch_result,
+                "classify": classify_result,
+            },
+        }
+        logger.info(f"新闻刷新完成: fetch={fetch_result}, classify={classify_result}")
+    except Exception as e:
+        logger.error(f"新闻刷新失败: {e}")
+        _refresh_status = {"running": False, "message": f"刷新失败: {e}", "result": None}
+    finally:
+        db.close()
+
+
+@router.post("/refresh")
+def refresh_news(background_tasks: BackgroundTasks):
+    """完整刷新管道（后台异步）：抓取新闻 → 入库 → LLM 分类"""
+    if _refresh_status["running"]:
+        return {"ok": False, "error": "刷新任务正在进行中", "status": _refresh_status}
+
+    background_tasks.add_task(_run_refresh_pipeline)
+    return {"ok": True, "message": "刷新任务已启动", "status": _refresh_status}
+
+
+@router.get("/refresh/status")
+def refresh_status():
+    """查询刷新任务状态"""
+    return _refresh_status

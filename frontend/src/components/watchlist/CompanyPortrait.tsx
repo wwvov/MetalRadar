@@ -377,8 +377,10 @@ export function CompanyPortrait({ company, onRegenerate, onDelete }: CompanyPort
           {editing && <Badge variant="secondary" className="text-[10px] bg-rose-100 text-rose-700 border-0">可编辑</Badge>}
         </h3>
 
-        {materials.length === 0 && !editing ? (
+        {!editing && portrait.materials.length === 0 ? (
           <p className="text-sm text-slate-400 text-center py-6">暂无敏感品种数据</p>
+        ) : editing && materials.length === 0 ? (
+          <p className="text-sm text-slate-400 text-center py-4">暂无敏感品种数据，点击下方按钮添加</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

@@ -10,9 +10,12 @@ import {
   CheckCheck,
   Sparkles,
   AlertTriangle,
+  RefreshCw,
+  Loader2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useNews } from '@/hooks/useNews'
+import { useNewsRefresh } from '@/hooks/useNewsRefresh'
 import { useWatchlist } from '@/providers'
 import api from '@/services/api'
 import { newsService } from '@/services/newsService'
@@ -47,6 +50,20 @@ export default function HomePage() {
   // 数据查询
   const macroQuery = useNews('macro_panel')
   const mainQuery = useNews(activeTab)
+
+  // 新闻刷新管道（akshare → LLM分类）
+  const newsRefresh = useNewsRefresh(() => {
+    macroQuery.refetch()
+    mainQuery.refetch()
+    setLastRefreshed(new Date())
+  })
+
+  // 首次加载时如果新闻数量不足，提示用户刷新（不自动触发，避免 SQLite 锁库 + akshare 反爬）
+  const showRefreshHint = useMemo(() => {
+    if (mainQuery.isLoading || macroQuery.isLoading) return false
+    const totalNews = (mainQuery.data?.total || 0) + (macroQuery.data?.total || 0)
+    return totalNews < 20
+  }, [mainQuery.isLoading, macroQuery.isLoading, mainQuery.data?.total, macroQuery.data?.total])
 
   // 自动刷新
   useEffect(() => {
@@ -187,6 +204,7 @@ export default function HomePage() {
   }, [mainQuery.data, follows])
 
   const noFollows = follows.length === 0
+  const totalNews = (mainQuery.data?.total || 0) + (macroQuery.data?.total || 0)
 
   return (
     <div className="min-h-full flex flex-col">
@@ -208,6 +226,28 @@ export default function HomePage() {
 
           {/* 右侧 */}
           <div className="flex items-center gap-3 shrink-0">
+            {/* 新闻刷新状态 */}
+            {newsRefresh.isRefreshing && (
+              <div className="flex items-center gap-1.5 bg-blue-50 text-blue-700 rounded-lg px-2.5 py-1">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span className="text-[11px] truncate max-w-[200px]">
+                  {newsRefresh.message}
+                </span>
+              </div>
+            )}
+
+            {/* 刷新按钮 */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-[12px] text-slate-500 hover:text-emerald-600"
+              onClick={newsRefresh.startRefresh}
+              disabled={newsRefresh.isRefreshing}
+            >
+              <RefreshCw className={cn('w-3.5 h-3.5 mr-1', newsRefresh.isRefreshing && 'animate-spin')} />
+              刷新数据
+            </Button>
+
             {/* 关注公司摘要 */}
             <div className="hidden lg:flex items-center gap-1.5 text-[12px] text-slate-600">
               <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
@@ -239,6 +279,28 @@ export default function HomePage() {
           refreshCooldown={refreshCooldown}
         />
       </div>
+
+      {/* ===== 2.5 新闻数据不足提示 ===== */}
+      {showRefreshHint && !newsRefresh.isRefreshing && (
+        <div className="px-6 pt-4">
+          <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-amber-600" />
+              <span className="text-sm text-amber-800">
+                当前仅有 <strong>{totalNews}</strong> 条新闻，点击「刷新数据」从东方财富、上海金属网、新浪财经获取最新资讯
+              </span>
+            </div>
+            <Button
+              size="sm"
+              className="h-8 text-xs bg-amber-600 hover:bg-amber-700 text-white shrink-0"
+              onClick={newsRefresh.startRefresh}
+            >
+              <RefreshCw className="w-3.5 h-3.5 mr-1" />
+              立即刷新
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* ===== 3. 上海金属网专属区块 ===== */}
       <div className="px-6 pt-5">
