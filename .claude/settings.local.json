@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(rm -f \"新建 文本文档.txt\")",
+      "Bash(git rm *)",
+      "Bash(git add *)"
+    ]
+  }
+}
