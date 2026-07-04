@@ -75,6 +75,7 @@ class CompanyDetailOut(BaseModel):
     business_desc: str = ""
     portrait: CompanyPortraitOut = CompanyPortraitOut()
     financial_summary: Optional[FinancialSummaryOut] = None
+    portrait_generated: bool = False
     portrait_updated_at: Optional[datetime] = None
 
     class Config:

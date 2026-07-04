@@ -18,7 +18,7 @@ from app.schemas.company import (
     FinancialSummaryOut,
     PortraitUpdateIn,
 )
-from app.services.llm_service import generate_company_portrait
+from app.services.llm_service import generate_company_portrait, PortraitGenerationError
 
 logger = logging.getLogger(__name__)
 
@@ -201,8 +201,14 @@ def get_company_detail(db: Session, company_id: str) -> CompanyDetailOut | None:
         business_desc=company.business_desc or "",
         portrait=portrait,
         financial_summary=financial_summary,
+        portrait_generated=bool(company.portrait_generated),
         portrait_updated_at=company.portrait_updated_at,
     )
+
+
+def _looks_like_stock_code(name: str) -> bool:
+    """判断名称是否像股票代码（纯6位数字）而非真实公司名"""
+    return bool(name) and len(name.strip()) == 6 and name.strip().isdigit()
 
 
 def _get_company_info_from_akshare(company_code: str) -> dict | None:
@@ -212,59 +218,113 @@ def _get_company_info_from_akshare(company_code: str) -> dict | None:
     for stock in stock_list:
         stock_code = str(stock.get("code", "")).zfill(6)
         if stock_code == code_str:
+            name = str(stock.get("name", company_code))
+            # 如果缓存中的名称也像股票代码，说明缓存损坏，不返回
+            if _looks_like_stock_code(name):
+                logger.warning(f"缓存中 {company_code} 的名称为股票代码 '{name}'，缓存可能损坏")
+                continue
             return {
-                "name": str(stock.get("name", company_code)),
+                "name": name,
                 "code": code_str,
             }
     logger.info(f"Company {company_code} not found in stock list cache")
     return None
 
 
+def _is_portrait_meaningful(company: Company) -> bool:
+    """判断已有画像是否有实际意义（非占位/空数据）"""
+    if not company.portrait_generated:
+        return False
+    # 占位画像的特征：position_detail 为"待AI分析"且无 industry
+    if company.position_detail == "待AI分析" and not company.industry:
+        return False
+    # 有行业信息 或 有品种 即认为有意义
+    if company.industry or (company.materials and len(company.materials) > 0):
+        return True
+    return False
+
+
 def init_company_profile(
-    db: Session, company_code: str, report_text: str | None = None, company_name: str = ""
+    db: Session, company_code: str, report_text: str | None = None, company_name: str = "",
+    *, llm_timeout: float = 60, llm_retries: int = 3,
 ) -> CompanyDetailOut:
-    """初始化公司画像 — 获取公司信息后调用大模型生成完整画像"""
+    """初始化公司画像 — 获取公司信息后调用大模型生成完整画像
+
+    Args:
+        llm_timeout: LLM 超时秒数（自动修复用15秒，手动操作用60秒）
+        llm_retries: LLM 重试次数（自动修复用1次，手动操作用3次）
+
+    Raises:
+        PortraitGenerationError: LLM 调用失败，调用方应处理
+    """
     company_code = str(company_code).zfill(6)
 
-    # 检查是否已存在
+    # 检查是否已存在有效画像
     existing = db.query(Company).filter(Company.id == company_code).first()
-    if existing and existing.portrait_generated:
-        # 已有完整画像，直接返回
+    if existing and _is_portrait_meaningful(existing):
+        logger.info(f"公司 {company_code} 已有有效画像，直接返回")
         return get_company_detail(db, company_code)
 
-    # 优先使用前端传入的公司名称；否则从 akshare 获取
-    if not company_name:
+    if existing and existing.portrait_generated:
+        logger.info(f"公司 {company_code} 画像为占位数据，将重新生成")
+
+    # 解析公司名称：如果传入的名称像股票代码或为空，从缓存查真实名称
+    company_info = None
+    industry_hint = ""
+
+    if not company_name or _looks_like_stock_code(company_name):
+        if _looks_like_stock_code(company_name):
+            logger.info(f"公司名称 '{company_name}' 像股票代码，从缓存查真实名称")
         company_info = _get_company_info_from_akshare(company_code)
-        company_name = company_info["name"] if company_info else company_code
-        industry_hint = ""
+        if company_info and not _looks_like_stock_code(company_info["name"]):
+            company_name = company_info["name"]
+        elif not company_name:
+            company_name = company_code
+        # else: 前端已传有效名称，保留使用
     else:
-        company_info = None  # 已有名称，不需要再查 akshare 基础信息
-        industry_hint = ""
+        # 前端已传真实名称，但也可以从缓存获取行业提示
+        pass
 
     # 尝试获取行业信息作为 LLM 提示
     if company_info:
         industry_hint = company_info.get("industry", "")
 
-    # 调用大模型生成画像
+    # 调用大模型生成画像 — 失败时抛出 PortraitGenerationError
     logger.info(f"正在为 {company_name}({company_code}) 生成AI画像...")
     portrait_data = generate_company_portrait(
         company_name=company_name,
         company_code=company_code,
         industry_hint=industry_hint,
         report_text=report_text,
+        timeout=llm_timeout,
+        max_retries=llm_retries,
+    )
+
+    # 验证画像质量
+    materials = portrait_data.get("materials", [])
+    is_fallback = (
+        portrait_data.get("position_detail") == "待AI分析"
+        and not portrait_data.get("industry")
+        and len(materials) == 0
     )
 
     # 保存或更新公司记录
     if existing:
         existing.name = company_name
-        existing.industry = portrait_data.get("industry", "") or existing.industry
-        existing.business_desc = portrait_data.get("business_desc", "") or existing.business_desc
-        existing.position = portrait_data.get("position", "mid")
-        existing.position_detail = portrait_data.get("position_detail", "")
-        existing.portrait_generated = True
-        existing.portrait_updated_at = datetime.utcnow()
-        # 清除旧材料记录，重新生成
-        db.query(CompanyMaterial).filter(CompanyMaterial.company_id == company_code).delete()
+        if not is_fallback:
+            existing.industry = portrait_data.get("industry", "") or existing.industry
+            existing.business_desc = portrait_data.get("business_desc", "") or existing.business_desc
+            existing.position = portrait_data.get("position", "mid")
+            existing.position_detail = portrait_data.get("position_detail", "")
+            existing.portrait_generated = True
+            existing.portrait_updated_at = datetime.utcnow()
+            # 清除旧材料记录，重新生成
+            db.query(CompanyMaterial).filter(CompanyMaterial.company_id == company_code).delete()
+        else:
+            # 占位画像：只更新名称，保持 portrait_generated=False 以便后续重试
+            existing.portrait_generated = False
+            existing.position = portrait_data.get("position", "mid")
+            existing.position_detail = portrait_data.get("position_detail", "")
     else:
         company = Company(
             id=company_code,
@@ -274,30 +334,34 @@ def init_company_profile(
             business_desc=portrait_data.get("business_desc", ""),
             position=portrait_data.get("position", "mid"),
             position_detail=portrait_data.get("position_detail", ""),
-            portrait_generated=True,
-            portrait_updated_at=datetime.utcnow(),
+            portrait_generated=not is_fallback,  # 占位画像不标记为已生成
+            portrait_updated_at=datetime.utcnow() if not is_fallback else None,
         )
         db.add(company)
 
-    # 保存敏感品种列表
-    materials = portrait_data.get("materials", [])
-    for m in materials:
-        material = CompanyMaterial(
-            company_id=company_code,
-            material_name=m.get("material_name", ""),
-            cost_pct=m.get("cost_pct"),
-            source=m.get("source", "inferred"),
-            direction=m.get("direction", "negative"),
-            contract=m.get("contract", ""),
-        )
-        db.add(material)
+    # 保存敏感品种列表（仅当非占位时）
+    if not is_fallback:
+        for m in materials:
+            material = CompanyMaterial(
+                company_id=company_code,
+                material_name=m.get("material_name", ""),
+                cost_pct=m.get("cost_pct"),
+                source=m.get("source", "inferred"),
+                direction=m.get("direction", "negative"),
+                contract=m.get("contract", ""),
+            )
+            db.add(material)
 
     db.commit()
 
     if existing:
         db.refresh(existing)
 
-    logger.info(f"公司画像已保存: {company_name}({company_code}), {len(materials)} 个敏感品种")
+    if not is_fallback:
+        logger.info(f"公司画像已保存: {company_name}({company_code}), {len(materials)} 个敏感品种")
+    else:
+        logger.warning(f"公司画像为占位数据: {company_name}({company_code})，portrait_generated=False")
+
     return get_company_detail(db, company_code)
 
 
@@ -341,6 +405,42 @@ def update_company_portrait(
     return get_company_detail(db, company_code)
 
 
+def init_company_profile_fallback(
+    db: Session, company_code: str
+) -> CompanyDetailOut:
+    """LLM不可用时创建占位公司记录 — 保存正确公司名，标记 portrait_generated=False 以便后续重试"""
+    company_code = str(company_code).zfill(6)
+
+    existing = db.query(Company).filter(Company.id == company_code).first()
+
+    # 从 akshare 缓存查找公司名；若查不到或仍为股票代码则用代码作名称
+    company_info = _get_company_info_from_akshare(company_code)
+    if company_info and not _looks_like_stock_code(company_info["name"]):
+        company_name = company_info["name"]
+    else:
+        company_name = company_code
+
+    if existing:
+        existing.name = company_name
+        existing.portrait_generated = False
+    else:
+        company = Company(
+            id=company_code,
+            name=company_name,
+            short_name=company_name,
+            industry="",
+            business_desc="",
+            position="mid",
+            position_detail="待AI分析 — 点击「重新生成」获取完整画像",
+            portrait_generated=False,
+        )
+        db.add(company)
+
+    db.commit()
+    logger.info(f"占位公司记录已保存: {company_name}({company_code}), portrait_generated=False")
+    return get_company_detail(db, company_code)
+
+
 def regenerate_company_portrait(
     db: Session, company_code: str, report_text: str | None = None
 ) -> CompanyDetailOut:
@@ -357,7 +457,7 @@ def regenerate_company_portrait(
 
 
 def get_user_follows(db: Session, user_id: str) -> list[CompanyBasic]:
-    """获取用户关注的公司列表"""
+    """获取用户关注的公司列表（含画像摘要）"""
     follows = (
         db.query(UserFollow)
         .filter(UserFollow.user_id == user_id)
@@ -377,7 +477,7 @@ def get_user_follows(db: Session, user_id: str) -> list[CompanyBasic]:
                 )
             )
         else:
-            # 公司记录尚未生成（如刚关注但未初始化画像）
+            # 公司记录尚未生成（如刚关注但未初始化画像），返回占位
             result.append(
                 CompanyBasic(
                     id=f.company_id,

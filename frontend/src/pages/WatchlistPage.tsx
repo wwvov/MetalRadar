@@ -4,7 +4,7 @@ import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useWatchlist } from '@/providers'
 import { useFollows } from '@/hooks/useFollows'
-import { useCompanyDetail } from '@/hooks/useCompany'
+import { useCompanyDetail, useCompanyDetails } from '@/hooks/useCompany'
 import { CompanyCard } from '@/components/watchlist/CompanyCard'
 import { CompanyPortrait } from '@/components/watchlist/CompanyPortrait'
 import { AddCompanyDrawer } from '@/components/watchlist/AddCompanyDrawer'
@@ -53,10 +53,26 @@ export default function WatchlistPage() {
 
   const { isLoading, isError, refetch } = followsQuery
 
+  // 批量获取所有关注公司的画像 — 触发后端自动修复无效画像
+  const followsIds = follows.map((c) => c.id)
+  const { data: portraitMap } = useCompanyDetails(followsIds)
+
   const handleRemove = async (companyId: string) => {
     await unfollowMutation.mutateAsync(companyId)
     if (selectedCompany?.id === companyId) {
       setSelectedCompany(null)
+    }
+  }
+
+  /** 将 CompanyDetail 转为 CompanyCard 需要的 portraitInfo */
+  const getPortraitInfo = (companyId: string) => {
+    const detail = portraitMap?.get(companyId)
+    if (!detail) return undefined
+    return {
+      position: detail.portrait.position,
+      position_detail: detail.portrait.position_detail,
+      materials: detail.portrait.materials,
+      updatedAt: detail.portrait_updated_at,
     }
   }
 
@@ -107,6 +123,7 @@ export default function WatchlistPage() {
                 selected={selectedCompany?.id === company.id}
                 onSelect={setSelectedCompany}
                 onRemove={handleRemove}
+                portraitInfo={getPortraitInfo(company.id)}
               />
             ))}
           </div>

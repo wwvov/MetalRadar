@@ -2,10 +2,16 @@
 
 import json
 import logging
+import time
 from openai import OpenAI
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+class PortraitGenerationError(Exception):
+    """LLM 画像生成失败异常 — 区别于配置错误，表示运行时调用失败"""
+    pass
 
 SYSTEM_PROMPT = """你是一位资深的中国金属/大宗商品行业分析师，专门研究A股上市公司的产业链位置和原材料敏感性。
 
@@ -146,82 +152,117 @@ def generate_company_portrait(
     company_code: str,
     industry_hint: str = "",
     report_text: str | None = None,
+    *,
+    timeout: float = 60,
+    max_retries: int = 3,
 ) -> dict:
     """调用大模型生成公司画像
 
+    Args:
+        timeout: 单次 LLM 调用超时秒数（默认60秒，自动修复用15秒）
+        max_retries: 最大重试次数（默认3次，自动修复用1次）
+
     Returns:
         dict with keys: industry, business_desc, position, position_detail, materials
+
+    Raises:
+        PortraitGenerationError: LLM 调用失败（API Key 已配置但运行时出错）
     """
+    # 配置错误：API Key 未设置 — 返回占位画像（开发环境允许继续）
     if not settings.LLM_API_KEY:
-        logger.warning("LLM_API_KEY 未配置，使用默认占位画像")
+        logger.warning("LLM_API_KEY 未配置，返回占位画像 — 请配置后重新生成")
         return _fallback_portrait(company_name, company_code)
 
     client = _get_openai_client()
     user_prompt = _build_user_prompt(company_name, company_code, industry_hint, report_text)
 
-    logger.info(f"正在调用 LLM 生成画像: model={settings.LLM_MODEL}, company={company_name}({company_code})")
+    logger.info(f"调用 LLM 生成画像: model={settings.LLM_MODEL}, "
+                f"company={company_name}({company_code}), timeout={timeout}s, retries={max_retries}")
 
-    try:
-        response = client.chat.completions.create(
-            model=settings.LLM_MODEL,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.3,
-            max_tokens=2000,
-        )
+    last_error = None
 
-        raw_content = response.choices[0].message.content or ""
-        logger.info(f"LLM 原始响应(前300字符): {raw_content[:300]}")
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"LLM 调用尝试 {attempt}/{max_retries}")
 
-        # 提取并解析 JSON
-        json_text = _extract_json(raw_content)
-        logger.info(f"提取后JSON(前300字符): {json_text[:300]}")
-        result = json.loads(json_text)
+            response = client.chat.completions.create(
+                model=settings.LLM_MODEL,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.3,
+                max_tokens=2000,
+                response_format={"type": "json_object"},  # 强制 JSON 输出
+                timeout=timeout,
+            )
 
-        # 验证必要字段
-        if "materials" not in result:
-            result["materials"] = []
-        if "position" not in result:
-            result["position"] = "mid"
-        if "industry" not in result:
-            result["industry"] = ""
+            raw_content = response.choices[0].message.content or ""
+            logger.info(f"LLM 原始响应(前300字符): {raw_content[:300]}")
 
-        # 清理 materials 中的无效字段
-        for m in result.get("materials", []):
-            if not m.get("material_name"):
-                m["material_name"] = "未知品种"
-            if "cost_pct" not in m:
-                m["cost_pct"] = None
-            if "direction" not in m or m["direction"] not in ("negative", "positive"):
-                m["direction"] = "negative"
-            if "contract" not in m:
-                m["contract"] = ""
-            if "source" not in m:
-                m["source"] = "inferred"
+            # 提取并解析 JSON
+            json_text = _extract_json(raw_content)
+            logger.info(f"提取后JSON(前300字符): {json_text[:300]}")
+            result = json.loads(json_text)
 
-        logger.info(
-            f"LLM 画像生成成功: {company_name} ({company_code}), "
-            f"行业={result.get('industry')}, "
-            f"位置={result.get('position')}, "
-            f"品种数={len(result.get('materials', []))}"
-        )
-        return result
+            # 验证必要字段
+            if "materials" not in result:
+                result["materials"] = []
+            if "position" not in result:
+                result["position"] = "mid"
+            if "industry" not in result:
+                result["industry"] = ""
 
-    except json.JSONDecodeError as e:
-        logger.error(f"LLM 返回 JSON 解析失败: {e}")
-        return _fallback_portrait(company_name, company_code)
-    except Exception as e:
-        logger.error(f"LLM 调用失败: {type(e).__name__}: {e}")
-        return _fallback_portrait(company_name, company_code)
+            # 清理 materials 中的无效字段
+            for m in result.get("materials", []):
+                if not m.get("material_name"):
+                    m["material_name"] = "未知品种"
+                if "cost_pct" not in m:
+                    m["cost_pct"] = None
+                if "direction" not in m or m["direction"] not in ("negative", "positive"):
+                    m["direction"] = "negative"
+                if "contract" not in m:
+                    m["contract"] = ""
+                if "source" not in m:
+                    m["source"] = "inferred"
+
+            # 验证画像质量：至少要有行业或品种
+            materials_count = len(result.get("materials", []))
+            if not result.get("industry") and materials_count == 0:
+                raise ValueError("LLM 返回画像不完整：industry 和 materials 均为空")
+
+            logger.info(
+                f"LLM 画像生成成功: {company_name} ({company_code}), "
+                f"行业={result.get('industry')}, "
+                f"位置={result.get('position')}, "
+                f"品种数={materials_count}"
+            )
+            return result
+
+        except json.JSONDecodeError as e:
+            last_error = e
+            logger.warning(f"尝试 {attempt}/{max_retries} JSON 解析失败: {e}")
+        except Exception as e:
+            last_error = e
+            logger.warning(f"尝试 {attempt}/{max_retries} 失败: {type(e).__name__}: {e}")
+
+        if attempt < max_retries:
+            wait = 2 ** attempt  # 指数退避: 2s, 4s
+            logger.info(f"等待 {wait}s 后重试...")
+            time.sleep(wait)
+
+    # 所有重试均失败
+    raise PortraitGenerationError(
+        f"LLM 画像生成失败（{max_retries} 次重试后仍失败）: "
+        f"{type(last_error).__name__}: {last_error}"
+    )
 
 
 def _fallback_portrait(company_name: str, company_code: str) -> dict:
-    """LLM 不可用时的兜底占位画像"""
+    """API Key 未配置时的占位画像 — 仅用于开发环境"""
     return {
         "industry": "",
-        "business_desc": f"{company_name}（{company_code}）的AI画像尚未生成，请配置LLM_API_KEY后重新生成。",
+        "business_desc": f"LLM_API_KEY 未配置，无法为 {company_name}（{company_code}）生成AI画像。请在 .env 中配置有效的 API Key 后点击「重新生成」。",
         "position": "mid",
         "position_detail": "待AI分析",
         "materials": [],

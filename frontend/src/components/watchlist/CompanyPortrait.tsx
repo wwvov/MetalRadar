@@ -59,7 +59,9 @@ export function CompanyPortrait({ company, onRegenerate, onDelete }: CompanyPort
   // 编辑状态
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
   const [regenerating, setRegenerating] = useState(false)
+  const [regenError, setRegenError] = useState('')
   const [reportFile, setReportFile] = useState<File | null>(null)
 
   // 可编辑字段
@@ -84,11 +86,13 @@ export function CompanyPortrait({ company, onRegenerate, onDelete }: CompanyPort
   const handleCancel = useCallback(() => {
     setEditing(false)
     setReportFile(null)
+    setSaveError('')
   }, [])
 
   // 保存修改
   const handleSave = useCallback(async () => {
     setSaving(true)
+    setSaveError('')
     try {
       const finalDetail = customPositionDetail || positionDetail
       await companyService.updatePortrait(company.id, {
@@ -105,8 +109,9 @@ export function CompanyPortrait({ company, onRegenerate, onDelete }: CompanyPort
       })
       queryClient.invalidateQueries({ queryKey: ['company-detail', company.id] })
       setEditing(false)
-    } catch {
-      // 保存失败，保持编辑状态
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail
+      setSaveError(detail || err?.message || '保存失败，请检查网络连接')
     } finally {
       setSaving(false)
     }
@@ -115,14 +120,16 @@ export function CompanyPortrait({ company, onRegenerate, onDelete }: CompanyPort
   // 重新生成画像
   const handleRegenerate = useCallback(async () => {
     setRegenerating(true)
+    setRegenError('')
     try {
       await companyService.regeneratePortrait(company.id, reportFile || undefined)
       queryClient.invalidateQueries({ queryKey: ['company-detail', company.id] })
       setReportFile(null)
       setEditing(false)
       onRegenerate?.()
-    } catch {
-      // 失败
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail
+      setRegenError(detail || err?.message || '重新生成失败，请稍后重试')
     } finally {
       setRegenerating(false)
     }
@@ -165,79 +172,88 @@ export function CompanyPortrait({ company, onRegenerate, onDelete }: CompanyPort
   return (
     <div className="space-y-4">
       {/* ===== 操作栏 ===== */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold text-slate-900">
-          {data.name} 画像
-          {data.portrait_updated_at && (
-            <span className="ml-2 text-xs font-normal text-slate-400">
-              更新于 {new Date(data.portrait_updated_at).toLocaleDateString('zh-CN')}
-            </span>
-          )}
-        </h2>
-        <div className="flex items-center gap-2">
-          {!editing ? (
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs"
-                onClick={handleStartEdit}
-              >
-                <Pencil className="w-3.5 h-3.5 mr-1" />
-                修改画像
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs"
-                onClick={onDelete}
-              >
-                <Trash2 className="w-3.5 h-3.5 mr-1 text-red-500" />
-                删除关注
-              </Button>
-            </>
-          ) : (
-            <>
-              {/* 重新生成区域 */}
-              <div className="flex items-center gap-2 mr-2">
-                <Input
-                  type="file"
-                  accept=".pdf"
-                  onChange={(e) => setReportFile(e.target.files?.[0] || null)}
-                  className="h-8 text-xs w-40"
-                />
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold text-slate-900">
+            {data.name} 画像
+            {data.portrait_updated_at && (
+              <span className="ml-2 text-xs font-normal text-slate-400">
+                更新于 {new Date(data.portrait_updated_at).toLocaleDateString('zh-CN')}
+              </span>
+            )}
+          </h2>
+          <div className="flex items-center gap-2">
+            {!editing ? (
+              <>
                 <Button
                   variant="outline"
                   size="sm"
                   className="h-8 text-xs"
-                  onClick={handleRegenerate}
-                  disabled={regenerating}
+                  onClick={handleStartEdit}
                 >
-                  <RotateCcw className={cn('w-3.5 h-3.5 mr-1', regenerating && 'animate-spin')} />
-                  {regenerating ? '生成中...' : '重新生成'}
+                  <Pencil className="w-3.5 h-3.5 mr-1" />
+                  修改画像
                 </Button>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs"
-                onClick={handleCancel}
-              >
-                <X className="w-3.5 h-3.5 mr-1" />
-                取消
-              </Button>
-              <Button
-                size="sm"
-                className="h-8 text-xs bg-emerald-700 hover:bg-emerald-800"
-                onClick={handleSave}
-                disabled={saving}
-              >
-                <Save className="w-3.5 h-3.5 mr-1" />
-                {saving ? '保存中...' : '保存修改'}
-              </Button>
-            </>
-          )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={onDelete}
+                >
+                  <Trash2 className="w-3.5 h-3.5 mr-1 text-red-500" />
+                  删除关注
+                </Button>
+              </>
+            ) : (
+              <>
+                {/* 重新生成区域 */}
+                <div className="flex items-center gap-2 mr-2">
+                  <Input
+                    type="file"
+                    accept=".pdf"
+                    onChange={(e) => setReportFile(e.target.files?.[0] || null)}
+                    className="h-8 text-xs w-40"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={handleRegenerate}
+                    disabled={regenerating}
+                  >
+                    <RotateCcw className={cn('w-3.5 h-3.5 mr-1', regenerating && 'animate-spin')} />
+                    {regenerating ? '生成中...' : '重新生成'}
+                  </Button>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={handleCancel}
+                >
+                  <X className="w-3.5 h-3.5 mr-1" />
+                  取消
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-8 text-xs bg-emerald-700 hover:bg-emerald-800"
+                  onClick={handleSave}
+                  disabled={saving}
+                >
+                  <Save className="w-3.5 h-3.5 mr-1" />
+                  {saving ? '保存中...' : '保存修改'}
+                </Button>
+              </>
+            )}
+          </div>
         </div>
+        {/* 错误提示 */}
+        {saveError && (
+          <p className="text-xs text-red-600 bg-red-50 rounded px-3 py-1.5">{saveError}</p>
+        )}
+        {regenError && (
+          <p className="text-xs text-amber-600 bg-amber-50 rounded px-3 py-1.5">{regenError}</p>
+        )}
       </div>
 
       {/* ===== 区域一：基础信息（只读） ===== */}

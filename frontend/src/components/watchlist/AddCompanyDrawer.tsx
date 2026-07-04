@@ -109,33 +109,25 @@ export function AddCompanyDrawer() {
   const handleStartProcessing = async () => {
     if (!selectedCompany) return
     setStep(3)
-    setProcessingStep('正在获取公司基础信息...')
+    setProcessingStep('正在调用AI大模型分析公司产业链...')
     setProcessingError('')
 
     try {
-      // 模拟 LLM 处理进度
-      setProcessingStep('正在分析主营业务...')
-      await sleep(600)
-      setProcessingStep('正在识别产业链位置...')
-      await sleep(500)
-      setProcessingStep('正在提取原材料依赖关系...')
-      await sleep(700)
-      setProcessingStep('正在估算成本占比...')
-
-      // 实际调用 API — 传入公司名称避免后端再查 akshare
+      // 直接调用 API — 后端会完成 LLM 调用（可能需要数秒）
       const detail = await companyService.initCompany(
         selectedCompany.id,
         reportFile || undefined,
         selectedCompany.name
       )
       setCompanyDetail(detail)
-      setProcessingStep('画像生成完成！')
-      await sleep(400)
       setStep(4)
-    } catch (err) {
-      setProcessingError(
-        err instanceof Error ? err.message : '画像生成失败，请检查网络连接后重试'
-      )
+    } catch (err: any) {
+      // 提取API返回的详细错误信息
+      const detail = err?.response?.data?.detail
+      const message = detail
+        || (err instanceof Error ? err.message : '')
+        || '画像生成失败，请检查网络连接后重试'
+      setProcessingError(message)
     }
   }
 
@@ -529,6 +521,3 @@ export function AddCompanyDrawer() {
   )
 }
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}

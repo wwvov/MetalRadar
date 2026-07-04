@@ -31,6 +31,7 @@ export interface CompanyDetail extends CompanyBasic {
   business_desc: string
   portrait: CompanyPortrait
   financial_summary?: FinancialSummary
+  portrait_generated: boolean
   portrait_updated_at?: string
 }
 
