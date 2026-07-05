@@ -22,6 +22,7 @@ import api from '@/services/api'
 import { newsService } from '@/services/newsService'
 import { MacroTicker } from '@/components/news/MacroTicker'
 import { ShmetBlock } from '@/components/news/ShmetBlock'
+import { MetalPriceDashboard } from '@/components/news/MetalPriceDashboard'
 import { NewsCard } from '@/components/news/NewsCard'
 import { NewsSkeleton } from '@/components/news/NewsSkeleton'
 import { ErrorCard } from '@/components/news/ErrorCard'
@@ -337,9 +338,12 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* ===== 3. 上海金属网专属区块 ===== */}
+      {/* ===== 3. 上海金属网 + 敏感金属价格仪表盘 (左右 1:1 分栏) ===== */}
       <div className="px-6 pt-5">
-        <ShmetBlock />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <ShmetBlock />
+          <MetalPriceDashboard follows={follows} />
+        </div>
       </div>
 
       {/* ===== 4. 无关注公司引导 ===== */}
@@ -427,7 +431,6 @@ export default function HomePage() {
                 </Button>
                 {follows.map((f) => {
                   const count = companyCounts.get(f.id) || 0
-                  if (count === 0) return null
                   return (
                     <Button
                       key={f.id}

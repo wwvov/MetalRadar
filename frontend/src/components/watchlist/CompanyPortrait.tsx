@@ -324,7 +324,7 @@ export function CompanyPortrait({ company, onRegenerate, onDelete }: CompanyPort
           <div className="space-y-3">
             <div>
               <p className="text-xs text-slate-500 mb-1.5">产业链层级</p>
-              <Select value={position} onValueChange={(v) => { setPosition(v); setPositionDetail(''); setCustomPositionDetail('') }}>
+              <Select value={position} onValueChange={(v) => { setPosition(v ?? ''); setPositionDetail(''); setCustomPositionDetail('') }}>
                 <SelectTrigger className="w-64">
                   <SelectValue placeholder="选择产业链层级" />
                 </SelectTrigger>

@@ -80,9 +80,7 @@ def get_news_list(
 
         return _execute_query(db, query, user_id, page, page_size, skip_source_exclusion=True)
 
-    # ===== 主聚合流 Tab（排除上海金属网来源） =====
-    query = query.filter(News.source != SHMET_SOURCE)
-
+    # ===== 主聚合流 Tab =====
     if tab == "followed_companies":
         followed_codes = _get_followed_codes(db, user_id)
         if not followed_codes:
@@ -114,7 +112,12 @@ def get_news_list(
         query = query.filter(News.is_relevant == True)
 
     elif tab == "macro":
+        # 宏观 Tab：仅灰级关联 + 排除上海金属网
+        query = query.filter(News.source != SHMET_SOURCE)
         query = query.filter(News.relevance_level == "gray")
+    else:
+        # "all" Tab：全量但排除上海金属网（走专属区块展示）
+        query = query.filter(News.source != SHMET_SOURCE)
 
     # ===== 多值筛选器 =====
     if company_filters:

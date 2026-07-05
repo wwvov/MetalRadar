@@ -12,6 +12,7 @@ export interface FuturesKline {
 
 export interface FuturesQuote {
   contract: string
+  date: string
   price: number
   change_pct: number
   open: number
@@ -19,7 +20,6 @@ export interface FuturesQuote {
   low: number
   volume: number
   open_interest: number
-  timestamp: string
 }
 
 export interface VolatilityCone {
@@ -33,5 +33,38 @@ export interface PricePercentile {
   year_high: number
   year_low: number
   percentile: number
-  base_price: number
+}
+
+export interface PressureData {
+  base_price: number | null
+  current_price: number
+  change_pct: number
+  pressure_level: 'low' | 'medium' | 'high'
+  estimated_margin_impact: number | null
+}
+
+export interface DashboardMaterial {
+  material_name: string
+  cost_pct: number | null
+  direction: 'negative' | 'positive'
+  contract: string
+  quote: FuturesQuote | null
+  percentile: PricePercentile | null
+  history_3m: { date: string; close: number }[]
+  pressure: PressureData | null
+}
+
+export interface DashboardData {
+  company: {
+    id: string
+    name: string
+    code: string
+    industry: string
+  }
+  materials: DashboardMaterial[]
+}
+
+export interface DashboardResponse {
+  ok: boolean
+  data: DashboardData
 }
