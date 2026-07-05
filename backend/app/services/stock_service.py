@@ -430,6 +430,8 @@ def get_financial_data(code: str) -> dict:
         try:
             import akshare as ak
             from datetime import datetime
+            import random
+            import time as time_mod
 
             today = datetime.now()
             # 计算最近6个报告期，过滤掉财报可能尚未披露的（<45天），取最多4个
@@ -439,6 +441,8 @@ def get_financial_data(code: str) -> dict:
             periods = [p for p in periods if _period_to_date(p) < cutoff][:4]
             logger.info(f"获取 {code} 财务数据，报告期: {periods}")
 
+            # 统计实际API调用次数，控制频次避免触发反爬
+            api_calls = 0
             quarters = []
 
             for period in periods:
@@ -446,12 +450,15 @@ def get_financial_data(code: str) -> dict:
                 rows = _read_period_cache("lrb", period)
                 if rows is None:
                     try:
+                        if api_calls > 0:
+                            time_mod.sleep(random.uniform(0.4, 0.9))
                         def _fetch_lrb():
                             return ak.stock_lrb_em(date=period)
 
                         df_lr = _retry_with_backoff(_fetch_lrb, max_retries=2, label=f"利润表 {period}")
                         rows = df_lr.to_dict(orient="records")
                         _write_period_cache("lrb", period, rows)
+                        api_calls += 1
                         logger.info(f"利润表 {period} 获取成功，{len(rows)} 条记录")
                     except Exception as e:
                         logger.warning(f"利润表 {period} 获取失败（已重试）: {e}")
@@ -482,22 +489,81 @@ def get_financial_data(code: str) -> dict:
                 bs_rows = _read_period_cache("bs", period)
                 if bs_rows is None:
                     try:
+                        if api_calls > 0:
+                            time_mod.sleep(random.uniform(0.3, 0.7))
                         def _fetch_bs():
                             return ak.stock_zcfz_em(date=period)
 
                         df_bs = _retry_with_backoff(_fetch_bs, max_retries=1, label=f"资产负债表 {period}")
                         bs_rows = df_bs.to_dict(orient="records")
                         _write_period_cache("bs", period, bs_rows)
+                        api_calls += 1
                     except Exception:
                         bs_rows = []
 
                 for bs_row in bs_rows:
                     if str(bs_row.get("股票代码", "")) == code:
-                        quarter["total_assets"] = _safe_float(bs_row, "资产总计")
+                        quarter["total_assets"] = _safe_float(bs_row, "资产-总资产")
                         quarter["equity"] = _safe_float(bs_row, "股东权益合计")
+                        quarter["total_liabilities"] = _safe_float(bs_row, "负债-总负债")
+                        break
+
+                # --- 现金流量表（可选） ---
+                cf_rows = _read_period_cache("cf", period)
+                if cf_rows is None:
+                    try:
+                        if api_calls > 0:
+                            time_mod.sleep(random.uniform(0.3, 0.7))
+                        def _fetch_cf():
+                            return ak.stock_xjll_em(date=period)
+
+                        df_cf = _retry_with_backoff(_fetch_cf, max_retries=1, label=f"现金流量表 {period}")
+                        cf_rows = df_cf.to_dict(orient="records")
+                        _write_period_cache("cf", period, cf_rows)
+                        api_calls += 1
+                    except Exception:
+                        cf_rows = []
+
+                for cf_row in cf_rows:
+                    if str(cf_row.get("股票代码", "")) == code:
+                        quarter["operating_cashflow"] = _safe_float(cf_row, "经营性现金流-现金流量净额")
                         break
 
                 quarters.append(quarter)
+
+            # --- 扣非净利润：从财务分析指标获取（stock_lrb_em 不含此字段） ---
+            try:
+                if api_calls > 0:
+                    time_mod.sleep(random.uniform(0.5, 1.0))
+                current_year = today.year
+                df_indicator = ak.stock_financial_analysis_indicator(
+                    symbol=code, start_year=str(current_year - 1)
+                )
+                api_calls += 1
+                # 构建 日期→扣非净利润 映射（数据为累计值，需转为单季度值）
+                kf_map: dict[str, float] = {}  # period -> standalone value
+                kf_rows = sorted(
+                    df_indicator.to_dict(orient="records"),
+                    key=lambda r: str(r.get("日期", ""))
+                )
+                prev_cumulative = 0.0
+                for kf_row in kf_rows:
+                    date_str = str(kf_row.get("日期", ""))  # e.g. "2024-03-31"
+                    if not date_str or len(date_str) < 10:
+                        continue
+                    cumulative = _safe_float(kf_row, "扣除非经常性损益后的净利润(元)") or 0.0
+                    period = date_str[:4] + "Q" + str((int(date_str[5:7]) - 1) // 3 + 1)
+                    standalone = cumulative - prev_cumulative
+                    if standalone < 0:
+                        standalone = cumulative  # Q1 or reset case
+                    kf_map[period] = standalone
+                    prev_cumulative = cumulative
+
+                for q in quarters:
+                    if q.get("deducted_net_profit") is None:
+                        q["deducted_net_profit"] = kf_map.get(q["period"])
+            except Exception as e:
+                logger.warning(f"扣非净利润获取失败 {code}: {e}")
 
             result = {
                 "code": code,

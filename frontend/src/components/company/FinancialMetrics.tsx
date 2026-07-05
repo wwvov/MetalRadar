@@ -18,7 +18,7 @@ const SOURCE_LABELS: Record<string, { label: string; icon: typeof Database; colo
 }
 
 // --- 季度趋势图：指标选择器类型与配置 ---
-type MetricKey = 'all' | 'revenue' | 'cost' | 'gross_profit' | 'net_profit'
+type MetricKey = 'all' | 'revenue' | 'cost' | 'gross_profit' | 'net_profit' | 'deducted_net_profit'
 
 const METRICS: { key: MetricKey; label: string; color: string }[] = [
   { key: 'all', label: '全部', color: '' },
@@ -26,6 +26,7 @@ const METRICS: { key: MetricKey; label: string; color: string }[] = [
   { key: 'cost', label: '营业成本', color: '#f59e0b' },
   { key: 'gross_profit', label: '毛利润', color: '#10b981' },
   { key: 'net_profit', label: '净利润', color: '#8b5cf6' },
+  { key: 'deducted_net_profit', label: '扣非净利润', color: '#ef4444' },
 ]
 
 /** 从季度数据中提取指定指标值；毛利润 = 营收 - 成本 */
@@ -39,6 +40,8 @@ function getMetricValue(q: FinancialQuarter, metric: MetricKey): number | null {
       return q.revenue != null && q.cost != null ? q.revenue - q.cost : null
     case 'net_profit':
       return q.net_profit
+    case 'deducted_net_profit':
+      return q.deducted_net_profit ?? null
     case 'all':
       return null // 全部模式不走单指标取值
   }
@@ -53,6 +56,25 @@ function getMaxQuarters(width: number): number {
   return 40                   // 10年
 }
 
+/** 计算最新季度相对于去年同期的同比增长率 */
+function computeYoYGrowth(quarters: FinancialQuarter[], field: 'revenue' | 'deducted_net_profit'): number | null {
+  if (!quarters || quarters.length < 5) return null
+  const current = quarters[0]  // 最新在前
+  const currentYear = parseInt(current.period.slice(0, 4))
+  const currentQ = current.period.slice(4, 6)
+  const yearAgo = quarters.find(q => {
+    const y = parseInt(q.period.slice(0, 4))
+    const qStr = q.period.slice(4, 6)
+    return y === currentYear - 1 && qStr === currentQ
+  })
+  const currentVal = current[field]
+  const yearAgoVal = yearAgo?.[field]
+  if (currentVal != null && yearAgoVal != null && yearAgoVal !== 0) {
+    return parseFloat((((currentVal - yearAgoVal) / Math.abs(yearAgoVal)) * 100).toFixed(2))
+  }
+  return null
+}
+
 interface FinancialMetricsProps {
   data: FinancialData | undefined
   isLoading: boolean
@@ -65,8 +87,8 @@ export function FinancialMetrics({ data, isLoading, isError, onRetry }: Financia
     return (
       <Card className="p-5 space-y-4">
         <Skeleton className="h-5 w-32" />
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {Array.from({ length: 4 }).map((_, i) => (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          {Array.from({ length: 5 }).map((_, i) => (
             <Skeleton key={i} className="h-24 rounded-lg" />
           ))}
         </div>
@@ -126,28 +148,74 @@ export function FinancialMetrics({ data, isLoading, isError, onRetry }: Financia
         <p className="text-xs text-slate-400 mb-3">报告期：{data.report_period}</p>
       )}
 
-      {/* 核心指标卡片 */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-        <MetricCard
-          label="营业收入"
-          value={data.revenue}
-          format="yi"
-        />
-        <MetricCard
-          label="营业成本"
-          value={data.cost}
-          format="yi"
-        />
-        <MetricCard
-          label="毛利率"
-          value={data.gross_margin}
-          suffix="%"
-        />
-        <MetricCard
-          label="净利率"
-          value={data.net_margin}
-          suffix="%"
-        />
+      {/* ===== 盈利能力 ===== */}
+      <div className="mb-3">
+        <h4 className="text-xs font-semibold text-slate-700 mb-2 flex items-center gap-1.5">
+          <span className="w-1 h-3 bg-emerald-500 rounded-full" />
+          盈利能力
+        </h4>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+          <MetricCard label="营业收入" value={data.revenue} format="yi" />
+          <MetricCard label="营业成本" value={data.cost} format="yi" />
+          <MetricCard label="毛利率" value={data.gross_margin} suffix="%" formula="(收入-成本)/收入" />
+          <MetricCard label="净利率" value={data.net_margin} suffix="%" formula="净利润/收入" />
+          <MetricCard
+            label="扣非净利率"
+            formula="扣非净利润/收入"
+            value={data.revenue && data.deducted_net_profit != null
+              ? parseFloat(((data.deducted_net_profit / data.revenue) * 100).toFixed(2))
+              : null}
+            suffix="%"
+          />
+        </div>
+      </div>
+
+      {/* ===== 成长能力 ===== */}
+      <div className="mb-3">
+        <h4 className="text-xs font-semibold text-slate-700 mb-2 flex items-center gap-1.5">
+          <span className="w-1 h-3 bg-blue-500 rounded-full" />
+          成长能力
+        </h4>
+        <div className="grid grid-cols-2 gap-2">
+          <MetricCard
+            label="营收同比增速"
+            value={computeYoYGrowth(data.quarters, 'revenue')}
+            suffix="%"
+            formula="(本期-去年同期)/|去年同期|"
+          />
+          <MetricCard
+            label="扣非净利同比增速"
+            value={computeYoYGrowth(data.quarters, 'deducted_net_profit')}
+            suffix="%"
+            formula="(本期-去年同期)/|去年同期|"
+          />
+        </div>
+      </div>
+
+      {/* ===== 财务健康 ===== */}
+      <div>
+        <h4 className="text-xs font-semibold text-slate-700 mb-2 flex items-center gap-1.5">
+          <span className="w-1 h-3 bg-amber-500 rounded-full" />
+          财务健康
+        </h4>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+          <MetricCard
+            label="资产负债率"
+            value={data.total_assets != null && data.total_liabilities != null && data.total_assets !== 0
+              ? parseFloat(((data.total_liabilities / data.total_assets) * 100).toFixed(2))
+              : null}
+            suffix="%"
+            formula="总负债/总资产"
+          />
+          <MetricCard label="经营现金流净额" value={data.operating_cashflow} format="yi" />
+          <MetricCard
+            label="现金流/净利润"
+            value={data.net_profit != null && data.operating_cashflow != null && data.net_profit !== 0
+              ? parseFloat((data.operating_cashflow / data.net_profit).toFixed(2))
+              : null}
+            formula="经营现金流/净利润"
+          />
+        </div>
       </div>
 
       {/* 季度趋势图 */}
@@ -163,11 +231,13 @@ function MetricCard({
   value,
   suffix,
   format,
+  formula,
 }: {
   label: string
   value: number | null
   suffix?: string
   format?: 'yi' | 'wan'
+  formula?: string
 }) {
   return (
     <div className="text-center p-3 bg-slate-50 rounded-lg">
@@ -179,6 +249,9 @@ function MetricCard({
             : `${value.toLocaleString()}${suffix || ''}`
           : '—'}
       </p>
+      {formula && (
+        <p className="text-[10px] text-slate-400 mt-0.5 leading-tight">{formula}</p>
+      )}
     </div>
   )
 }
@@ -292,7 +365,7 @@ function QuarterlyTrendChart({ quarters }: { quarters: FinancialQuarter[] }) {
           color: m.color,
           borderRadius: [4, 4, 0, 0],
         },
-        barMaxWidth: isAll ? 36 : 52,
+        barMaxWidth: isAll ? 28 : 52,
         barGap: isAll ? '30%' : undefined,
         label: showLabel
           ? {

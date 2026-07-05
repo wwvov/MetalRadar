@@ -96,6 +96,7 @@ export interface FinancialQuarter {
   cost: number | null
   net_profit: number | null
   operating_profit: number | null
+  deducted_net_profit?: number | null
   total_assets?: number | null
   total_liabilities?: number | null
   equity?: number | null
@@ -116,6 +117,10 @@ export interface FinancialData {
   revenue: number | null
   cost: number | null
   net_profit: number | null
+  deducted_net_profit: number | null
+  total_assets: number | null
+  total_liabilities: number | null
+  operating_cashflow: number | null
   report_period: string
 }
 

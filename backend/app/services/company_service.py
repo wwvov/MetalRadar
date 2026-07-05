@@ -652,6 +652,10 @@ def get_aggregated_financials(db: Session, company_id: str) -> dict:
         "revenue": None,
         "cost": None,
         "net_profit": None,
+        "deducted_net_profit": None,
+        "total_assets": None,
+        "total_liabilities": None,
+        "operating_cashflow": None,
         "report_period": "",
     }
 
@@ -687,6 +691,10 @@ def get_aggregated_financials(db: Session, company_id: str) -> dict:
             result["revenue"] = latest.get("revenue")
             result["cost"] = latest.get("cost")
             result["net_profit"] = latest.get("net_profit")
+            result["deducted_net_profit"] = latest.get("deducted_net_profit")
+            result["total_assets"] = latest.get("total_assets")
+            result["total_liabilities"] = latest.get("total_liabilities")
+            result["operating_cashflow"] = latest.get("operating_cashflow")
             if latest.get("revenue") and latest.get("cost"):
                 result["gross_margin"] = round(
                     (latest["revenue"] - latest["cost"]) / latest["revenue"] * 100, 2
@@ -816,6 +824,14 @@ def _supplement_from_api(result: dict, company_id: str):
             result["cost"] = latest.get("cost")
         if result["net_profit"] is None:
             result["net_profit"] = latest.get("net_profit")
+        if result.get("deducted_net_profit") is None:
+            result["deducted_net_profit"] = latest.get("deducted_net_profit")
+        if result.get("total_assets") is None:
+            result["total_assets"] = latest.get("total_assets")
+        if result.get("total_liabilities") is None:
+            result["total_liabilities"] = latest.get("total_liabilities")
+        if result.get("operating_cashflow") is None:
+            result["operating_cashflow"] = latest.get("operating_cashflow")
         if result["gross_margin"] is None and result["revenue"] and result["cost"]:
             result["gross_margin"] = round(
                 (result["revenue"] - result["cost"]) / result["revenue"] * 100, 2
