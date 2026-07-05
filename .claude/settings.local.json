@@ -44,7 +44,8 @@
       "Bash(taskkill //F //IM python3.exe)",
       "Bash(node /d/MetalRadar/frontend/node_modules/vite/bin/vite.js build --outDir /d/MetalRadar/frontend/dist)",
       "Bash(cat backend/.env)",
-      "Bash(grep -r \"port\\\\|PORT\\\\|uvicorn\" backend/app/main.py)"
+      "Bash(grep -r \"port\\\\|PORT\\\\|uvicorn\" backend/app/main.py)",
+      "Bash(npm install *)"
     ]
   }
 }

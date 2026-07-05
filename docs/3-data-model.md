@@ -90,3 +90,5 @@ AI 在生成数据库操作代码时，必须将每个字段的值视为**从运
 | direct_labor_pct | DECIMAL(5,2) | 直接人工占成本比例 |
 | manufacturing_pct | DECIMAL(5,2) | 制造费用占成本比例 |
 | raw_data | JSON | 大模型从财报中提取的完整结构化数据，内容取决于财报原文 |
+| report_type | VARCHAR(10) | 'annual' 或 'quarterly'，由用户上传时标注或AI自动识别 |
+| extraction_source | VARCHAR(20) | 'api'（外部接口）、'report_ai'（财报AI提取）、'user_edit'（用户修正） |

@@ -1,34 +1,34 @@
 """期货数据服务 — 从 akshare 获取主力合约行情，文件缓存 + 反爬控制
 
 核心设计：每个品种 symbol 只调用一次 akshare，派生 quote/percentile/history/base_price。
-使用 threading.Lock 串行化 akshare 调用，避免并发触发反爬。
+使用全局锁串行化 akshare 调用，与 stock_service 共用避免并发触发反爬。
 """
 
 import json
 import logging
 import os
-import threading
 import time
 from datetime import datetime, timezone, timedelta
 
 import pandas as pd
 
 from app.core.config import settings
+from app.services._scrape_control import (
+    cooldown,
+    mark_fetch_time,
+    retry_with_backoff,
+    acquire_lock,
+    SCRAPE_COOLDOWN,
+)
 
 logger = logging.getLogger(__name__)
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", ".cache")
 # 期货日线数据每天更新一次，缓存 5 分钟足够
 FUTURES_CACHE_TTL = 300
-# 反爬冷却间隔（秒）— 同一个 akshare 调用之间的最小间隔
-SCRAPE_COOLDOWN = getattr(settings, "SCRAPE_COOLDOWN_SECONDS", 3)
 
 # 北京时区
 TZ_BEIJING = timezone(timedelta(hours=8))
-
-# 线程锁：确保同一时间只有一个 akshare 调用在进行
-_fetch_lock = threading.Lock()
-_last_fetch_time = 0.0
 
 # 品种名 → sina symbol（主力合约）
 # 支持 LLM 产出的多种品种名称变体
@@ -163,26 +163,21 @@ def _fetch_kline(symbol: str) -> pd.DataFrame:
         logger.info(f"期货 {symbol} 命中缓存，{len(cached['kline'])} 条K线")
         return pd.DataFrame(cached["kline"])
 
-    # 2. 获取锁，串行化 akshare 调用
-    with _fetch_lock:
+    # 2. 获取全局锁（与 stock_service 共用，串行化所有 akshare 调用）
+    with acquire_lock():
         # 双重检查：锁内再次检查缓存（其他线程可能已写入）
         cached = _read_cache(symbol)
         if cached and "kline" in cached:
             logger.info(f"期货 {symbol} 缓存命中（锁内双重检查）")
             return pd.DataFrame(cached["kline"])
 
-        # 反爬冷却
-        global _last_fetch_time
-        elapsed = time.time() - _last_fetch_time
-        if elapsed < SCRAPE_COOLDOWN:
-            wait = SCRAPE_COOLDOWN - elapsed
-            logger.info(f"反爬冷却中，等待 {wait:.1f}s...")
-            time.sleep(wait)
-
         try:
             import akshare as ak
-            df = ak.futures_main_sina(symbol=symbol)
-            _last_fetch_time = time.time()
+
+            def _fetch():
+                return ak.futures_main_sina(symbol=symbol)
+
+            df = retry_with_backoff(_fetch, max_retries=2, label=f"期货K线 {symbol}")
             logger.info(f"akshare 获取 {symbol} K线: {len(df)} 条")
 
             # 缓存原始数据
@@ -194,7 +189,6 @@ def _fetch_kline(symbol: str) -> pd.DataFrame:
             logger.error("akshare 未安装")
             raise
         except Exception as e:
-            _last_fetch_time = time.time()
             logger.error(f"获取期货数据失败 {symbol}: {e}")
             # 尝试返回过期缓存作为后备
             expired = _read_cache_expired(symbol)

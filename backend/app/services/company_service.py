@@ -631,8 +631,8 @@ def get_aggregated_financials(db: Session, company_id: str) -> dict:
 
     优先级：
     1. financial_reports 中 extraction_source='user_edit'
-    2. financial_reports 中 extraction_source='report_ai'（最新）
-    3. 东方财富三大报表 API（akshare）
+    2. 东方财富 API（akshare）— 结构化、可靠
+    3. financial_reports 中 extraction_source='report_ai'（LLM提取，不够可靠）
     4. 都无数据时返回空
     """
     company = db.query(Company).filter(Company.id == company_id).first()
@@ -648,13 +648,16 @@ def get_aggregated_financials(db: Session, company_id: str) -> dict:
         "direct_labor_pct": None,
         "manufacturing_pct": None,
         "gross_margin": None,
+        "net_margin": None,
         "revenue": None,
         "cost": None,
+        "net_profit": None,
         "report_period": "",
     }
 
-    # 优先级1: user_edit — 查询 raw_data JSON 中的 extraction_source 字段
     from sqlalchemy import func
+
+    # ===== 优先级1: user_edit（用户手动修正，永远最高优先级） =====
     user_edit = (
         db.query(FinancialReport)
         .filter(
@@ -666,11 +669,43 @@ def get_aggregated_financials(db: Session, company_id: str) -> dict:
     )
     if user_edit:
         _fill_from_report(result, user_edit, "user_edit")
-        if result["cost"] is None or result["gross_margin"] is None:
-            _supplement_from_api(result, company_id)
+        _supplement_from_api(result, company_id)
         return result
 
-    # 优先级2: report_ai — AI从财报提取
+    # ===== 优先级2: 东方财富 API（结构化数据，比 LLM 更准确） =====
+    api_success = False
+    try:
+        from app.services.stock_service import get_financial_data
+        api_data = get_financial_data(company_id)
+        if api_data and api_data.get("quarters"):
+            api_success = True
+            result["source"] = "api"
+            result["quarters"] = api_data["quarters"]
+            # 从最新季度提取摘要
+            latest = api_data["quarters"][0] if api_data["quarters"] else {}
+            result["report_period"] = latest.get("period", "")
+            result["revenue"] = latest.get("revenue")
+            result["cost"] = latest.get("cost")
+            result["net_profit"] = latest.get("net_profit")
+            if latest.get("revenue") and latest.get("cost"):
+                result["gross_margin"] = round(
+                    (latest["revenue"] - latest["cost"]) / latest["revenue"] * 100, 2
+                )
+            if latest.get("revenue") and latest.get("net_profit"):
+                result["net_margin"] = round(
+                    latest["net_profit"] / latest["revenue"] * 100, 2
+                )
+    except Exception as e:
+        logger.warning(f"从东方财富API获取财务数据失败 {company_id}: {e}")
+
+    # API 数据完整 → 直接返回
+    if api_success and result["revenue"] is not None:
+        # 如果 API 缺 cost/gross_margin，尝试从 AI 报告补充
+        if result["cost"] is None or result["gross_margin"] is None:
+            _supplement_from_report_fallback(result, company_id, db)
+        return result
+
+    # ===== 优先级3: report_ai（LLM 财报提取，作为兜底） =====
     report_ai = (
         db.query(FinancialReport)
         .filter(
@@ -682,11 +717,10 @@ def get_aggregated_financials(db: Session, company_id: str) -> dict:
     )
     if report_ai:
         _fill_from_report(result, report_ai, "report_ai")
-        if result["cost"] is None or result["gross_margin"] is None:
-            _supplement_from_api(result, company_id)
+        _supplement_from_api(result, company_id)
         return result
 
-    # 优先级2b: 兼容旧数据 — 有财务数据但没有 extraction_source 标记
+    # 优先级3b: 兼容旧数据
     legacy_report = (
         db.query(FinancialReport)
         .filter(FinancialReport.company_id == company_id)
@@ -695,31 +729,12 @@ def get_aggregated_financials(db: Session, company_id: str) -> dict:
     )
     if legacy_report:
         _fill_from_report(result, legacy_report, "report_ai")
-        # 若DB报告数据不完整（缺cost/gross_margin），尝试用API补充
-        if result["cost"] is None or result["gross_margin"] is None:
-            logger.info(f"DB报告数据不完整，尝试API补充 {company_id}")
-            _supplement_from_api(result, company_id)
+        _supplement_from_api(result, company_id)
         return result
 
-    # 优先级3: 东方财富 API
-    try:
-        from app.services.stock_service import get_financial_data
-        api_data = get_financial_data(company_id)
-        if api_data and api_data.get("quarters"):
-            result["source"] = "api"
-            result["quarters"] = api_data["quarters"]
-            # 从最新季度提取摘要
-            latest = api_data["quarters"][0] if api_data["quarters"] else {}
-            result["report_period"] = latest.get("period", "")
-            result["revenue"] = latest.get("revenue")
-            result["cost"] = latest.get("cost")
-            if latest.get("revenue") and latest.get("cost"):
-                result["gross_margin"] = round(
-                    (latest["revenue"] - latest["cost"]) / latest["revenue"] * 100, 2
-                )
-            return result
-    except Exception as e:
-        logger.warning(f"从东方财富API获取财务数据失败 {company_id}: {e}")
+    # API 部分成功（有 quarters 但 summary 字段缺失）
+    if api_success:
+        return result
 
     return result
 
@@ -734,12 +749,58 @@ def _fill_from_report(result: dict, report: FinancialReport, source: str):
     result["direct_material_pct"] = float(report.direct_material_pct) if report.direct_material_pct else None
     result["direct_labor_pct"] = float(report.direct_labor_pct) if report.direct_labor_pct else None
     result["manufacturing_pct"] = float(report.manufacturing_pct) if report.manufacturing_pct else None
+    # net_profit 存在 raw_data JSON 中（LLM 提取的额外字段）
+    if report.raw_data and isinstance(report.raw_data, dict):
+        np_val = report.raw_data.get("net_profit")
+        if np_val is not None:
+            try:
+                result["net_profit"] = float(np_val)
+                if result["revenue"] and result["net_profit"]:
+                    result["net_margin"] = round(result["net_profit"] / result["revenue"] * 100, 2)
+            except (ValueError, TypeError):
+                pass
+
+
+def _supplement_from_report_fallback(result: dict, company_id: str, db: Session):
+    """当 API 数据缺 cost/gross_margin 时，尝试用 AI 报告补充"""
+    from sqlalchemy import func
+    report_ai = (
+        db.query(FinancialReport)
+        .filter(
+            FinancialReport.company_id == company_id,
+            func.json_extract(FinancialReport.raw_data, '$.extraction_source') == 'report_ai',
+        )
+        .order_by(FinancialReport.id.desc())
+        .first()
+    )
+    if not report_ai:
+        # 尝试旧数据
+        report_ai = (
+            db.query(FinancialReport)
+            .filter(FinancialReport.company_id == company_id)
+            .order_by(FinancialReport.id.desc())
+            .first()
+        )
+    if report_ai:
+        if result["cost"] is None and report_ai.cost:
+            result["cost"] = float(report_ai.cost)
+        if result["gross_margin"] is None and report_ai.gross_margin:
+            result["gross_margin"] = float(report_ai.gross_margin)
+        if report_ai.raw_data and isinstance(report_ai.raw_data, dict):
+            np_val = report_ai.raw_data.get("net_profit")
+            if np_val is not None and result.get("net_profit") is None:
+                try:
+                    result["net_profit"] = float(np_val)
+                except (ValueError, TypeError):
+                    pass
+        logger.info(f"AI报告补充 {company_id} 完成")
 
 
 def _supplement_from_api(result: dict, company_id: str):
-    """用东方财富API补充DB报告中缺失的字段（cost, gross_margin等）
+    """用东方财富API补充季度趋势数据 + DB报告中缺失的字段
 
     合并策略：API数据不覆盖DB已有值，只填补缺失字段。
+    季度数据（quarters）总是从API获取，保证前端能渲染多季度趋势图。
     """
     try:
         from app.services.stock_service import get_financial_data
@@ -753,9 +814,15 @@ def _supplement_from_api(result: dict, company_id: str):
         # 只填补DB报告中缺失的字段
         if result["cost"] is None:
             result["cost"] = latest.get("cost")
+        if result["net_profit"] is None:
+            result["net_profit"] = latest.get("net_profit")
         if result["gross_margin"] is None and result["revenue"] and result["cost"]:
             result["gross_margin"] = round(
                 (result["revenue"] - result["cost"]) / result["revenue"] * 100, 2
+            )
+        if result.get("net_margin") is None and result["revenue"] and result.get("net_profit"):
+            result["net_margin"] = round(
+                result["net_profit"] / result["revenue"] * 100, 2
             )
 
         # 补充季度数据（如果DB报告没有）
@@ -763,8 +830,7 @@ def _supplement_from_api(result: dict, company_id: str):
             result["quarters"] = api_data["quarters"]
 
         # 标记为混合来源
-        if result["cost"] is not None:
-            result["source"] = result["source"] + "+api"
-            logger.info(f"API补充 {company_id} 成功: cost={result['cost']}, gross_margin={result['gross_margin']}")
+        result["source"] = result["source"] + "+api" if "+api" not in result["source"] else result["source"]
+        logger.info(f"API补充 {company_id} 完成")
     except Exception as e:
         logger.warning(f"API补充 {company_id} 失败（不影响DB数据）: {e}")

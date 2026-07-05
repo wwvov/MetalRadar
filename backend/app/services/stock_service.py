@@ -9,22 +9,24 @@
 import json
 import logging
 import os
-import threading
 import time
 
 import pandas as pd
 
 from app.core.config import settings
+from app.services._scrape_control import (
+    cooldown as _cooldown,
+    mark_fetch_time as _mark_fetch_time,
+    retry_with_backoff as _retry_with_backoff,
+    acquire_lock as _acquire_lock,
+    SCRAPE_COOLDOWN,
+)
 
 logger = logging.getLogger(__name__)
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", ".cache")
 STOCK_CACHE_TTL = 3600       # 股票K线缓存1小时（日线每天只更新一次）
 STOCK_INFO_CACHE_TTL = 86400  # 公司信息缓存1天
-SCRAPE_COOLDOWN = getattr(settings, "SCRAPE_COOLDOWN_SECONDS", 3)
-
-_fetch_lock = threading.Lock()
-_last_fetch_time = 0.0
 
 
 def _ensure_cache_dir():
@@ -72,14 +74,37 @@ def _write_cache(key: str, data: dict):
         logger.warning(f"写入股票缓存失败 {key}: {e}")
 
 
-def _cooldown():
-    """反爬冷却 — 确保两次 akshare 调用之间有足够间隔"""
-    global _last_fetch_time
-    elapsed = time.time() - _last_fetch_time
-    if elapsed < SCRAPE_COOLDOWN:
-        wait = SCRAPE_COOLDOWN - elapsed
-        logger.info(f"股票数据反爬冷却中，等待 {wait:.1f}s...")
-        time.sleep(wait)
+# ---- 按报告期缓存（跨公司共享） ----
+PERIOD_CACHE_TTL = 6 * 3600  # 报告期数据6小时内不变
+
+
+def _get_period_cache_path(prefix: str, period: str) -> str:
+    return os.path.join(CACHE_DIR, f"{prefix}_{period}.json")
+
+
+def _read_period_cache(prefix: str, period: str) -> list[dict] | None:
+    """读取按报告期缓存的报表数据，返回 rows 列表或 None"""
+    try:
+        path = _get_period_cache_path(prefix, period)
+        if not os.path.exists(path):
+            return None
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if time.time() - data.get("cached_at", 0) < PERIOD_CACHE_TTL:
+            return data.get("rows", [])
+    except Exception:
+        pass
+    return None
+
+
+def _write_period_cache(prefix: str, period: str, rows: list[dict]):
+    """写入按报告期缓存的报表数据"""
+    try:
+        _ensure_cache_dir()
+        with open(_get_period_cache_path(prefix, period), "w", encoding="utf-8") as f:
+            json.dump({"rows": rows, "cached_at": time.time()}, f, ensure_ascii=False, default=str)
+    except Exception as e:
+        logger.warning(f"写入期缓存失败 {prefix}_{period}: {e}")
 
 
 def _parse_kline_df(df: pd.DataFrame) -> list[dict]:
@@ -119,10 +144,14 @@ def _parse_kline_df(df: pd.DataFrame) -> list[dict]:
 
 
 def _safe_col(row, candidates: list[str]):
-    """从 DataFrame 行中按优先级取第一个存在的列值"""
+    """从 DataFrame 行或 dict 中按优先级取第一个存在的列值"""
     for c in candidates:
-        if c in row.index and pd.notna(row[c]):
-            return row[c]
+        if hasattr(row, "index"):
+            if c in row.index and pd.notna(row[c]):
+                return row[c]
+        elif isinstance(row, dict):
+            if c in row and row[c] is not None and not (isinstance(row[c], float) and pd.isna(row[c])):
+                return row[c]
     return None
 
 
@@ -227,7 +256,7 @@ def get_stock_kline(code: str, frequency: str = "daily", start_date: str = "", e
         logger.info(f"股票 {code} 日线命中缓存，{len(daily_data)} 条")
     else:
         # 需要获取日线数据
-        with _fetch_lock:
+        with _acquire_lock():
             cached_daily = _read_cache(daily_cache_key, STOCK_CACHE_TTL)
             if cached_daily and "data" in cached_daily:
                 daily_data = cached_daily["data"]
@@ -253,20 +282,21 @@ def get_stock_kline(code: str, frequency: str = "daily", start_date: str = "", e
 
 def _fetch_daily_kline(code: str, adjust: str, cache_key: str) -> list[dict]:
     """获取日线数据：优先新浪源，失败回退东财源"""
-    _cooldown()
+    import akshare as ak
 
     # 方案A: 新浪源 (更稳定，不易触发反爬)
     try:
-        import akshare as ak
         logger.info(f"尝试新浪源获取 {code} 日线...")
-        df = ak.stock_zh_a_daily(
-            symbol=f"sh{code}" if code.startswith(("6", "9")) else f"sz{code}",
-            start_date="20000101",
-            end_date="20991231",
-            adjust=adjust,
+        df = _retry_with_backoff(
+            lambda: ak.stock_zh_a_daily(
+                symbol=f"sh{code}" if code.startswith(("6", "9")) else f"sz{code}",
+                start_date="20000101",
+                end_date="20991231",
+                adjust=adjust,
+            ),
+            max_retries=1,
+            label=f"新浪K线 {code}",
         )
-        global _last_fetch_time
-        _last_fetch_time = time.time()
 
         if df is not None and not df.empty:
             daily_data = _parse_kline_df(df)
@@ -279,16 +309,18 @@ def _fetch_daily_kline(code: str, adjust: str, cache_key: str) -> list[dict]:
 
     # 方案B: 东财源 (数据更全但可能被反爬)
     try:
-        import akshare as ak
         logger.info(f"尝试东财源获取 {code} 日线...")
-        df = ak.stock_zh_a_hist(
-            symbol=code,
-            period="daily",
-            start_date="20200101",  # 限制范围提高成功率
-            end_date="20991231",
-            adjust=adjust,
+        df = _retry_with_backoff(
+            lambda: ak.stock_zh_a_hist(
+                symbol=code,
+                period="daily",
+                start_date="20200101",
+                end_date="20991231",
+                adjust=adjust,
+            ),
+            max_retries=1,
+            label=f"东财K线 {code}",
         )
-        _last_fetch_time = time.time()
 
         if df is not None and not df.empty:
             daily_data = _parse_kline_df(df)
@@ -309,7 +341,10 @@ def _fetch_daily_kline(code: str, adjust: str, cache_key: str) -> list[dict]:
 
 
 def get_stock_info(code: str) -> dict:
-    """获取A股公司基本信息
+    """获取A股公司基本信息（市值/行业/股本等）
+
+    带指数退避重试，失败时返回空数据而非抛异常，
+    确保前端能正常渲染页面（仅市值字段为空）。
 
     Args:
         code: 6位数字股票代码
@@ -322,20 +357,20 @@ def get_stock_info(code: str) -> dict:
     if cached and "data" in cached:
         return cached["data"]
 
-    with _fetch_lock:
+    with _acquire_lock():
         cached = _read_cache(cache_key, STOCK_INFO_CACHE_TTL)
         if cached and "data" in cached:
             return cached["data"]
 
-        _cooldown()
+        import akshare as ak
+
+        def _fetch_info():
+            return ak.stock_individual_info_em(symbol=code)
 
         try:
-            import akshare as ak
-            df = ak.stock_individual_info_em(symbol=code)
-            global _last_fetch_time
-            _last_fetch_time = time.time()
+            df = _retry_with_backoff(_fetch_info, max_retries=2, label=f"公司信息 {code}")
 
-            info = {}
+            info = {"code": code}
             for _, row in df.iterrows():
                 key = str(row["item"])
                 val = row["value"]
@@ -350,8 +385,7 @@ def get_stock_info(code: str) -> dict:
                 elif key == "流通股":
                     info["circulating_shares"] = float(val) if val and val != "-" else None
 
-            info["code"] = code
-            logger.info(f"akshare 获取 {code} 公司信息成功")
+            logger.info(f"公司信息 {code} 获取成功")
             _write_cache(cache_key, {"data": info})
             return info
 
@@ -359,19 +393,23 @@ def get_stock_info(code: str) -> dict:
             logger.error("akshare 未安装")
             raise
         except Exception as e:
-            _last_fetch_time = time.time()
-            logger.error(f"获取公司信息失败 {code}: {e}")
+            logger.error(f"获取公司信息失败 {code}（已重试）: {e}")
+            # 尝试过期缓存
             expired = _read_cache_expired(cache_key)
             if expired and "data" in expired:
+                logger.warning(f"使用过期缓存 {code}")
                 return expired["data"]
-            raise
+            # 返回空数据，不抛异常 — 让前端正常渲染
+            logger.warning(f"公司信息 {code} 返回空数据（API不可用）")
+            return {"code": code, "total_market_cap": None, "circulating_market_cap": None,
+                    "industry": "", "total_shares": None, "circulating_shares": None}
 
 
 def get_financial_data(code: str) -> dict:
-    """获取公司最近2个季度的核心财务数据
+    """获取公司最近8个季度（2年）的核心财务数据
 
-    使用东财利润表接口获取营收/成本/利润（批量全市场接口，每次拉取全量）。
-    资产负债表和现金流量表仅在利润表获取成功后作为补充。
+    使用东财利润表接口，按报告期缓存全市场数据（跨公司共享）。
+    首次拉取一个报告期需要 ~3s，后续公司命中缓存几乎即时。
 
     Args:
         code: 6位数字股票代码
@@ -384,65 +422,82 @@ def get_financial_data(code: str) -> dict:
     if cached and "data" in cached:
         return cached["data"]
 
-    with _fetch_lock:
+    with _acquire_lock():
         cached = _read_cache(cache_key, STOCK_INFO_CACHE_TTL)
         if cached and "data" in cached:
             return cached["data"]
 
-        _cooldown()
-
         try:
             import akshare as ak
-            import calendar
             from datetime import datetime
 
-            # 计算最近2个报告期
             today = datetime.now()
-            periods = _calc_report_periods(today, 2)
-
+            # 计算最近6个报告期，过滤掉财报可能尚未披露的（<45天），取最多4个
+            from datetime import timedelta
+            periods = _calc_report_periods(today, 6)
+            cutoff = today - timedelta(days=45)
+            periods = [p for p in periods if _period_to_date(p) < cutoff][:4]
             logger.info(f"获取 {code} 财务数据，报告期: {periods}")
 
             quarters = []
 
             for period in periods:
-                try:
-                    # 利润表（包含营收/成本/利润）
-                    df_lr = ak.stock_lrb_em(date=period)
-                    global _last_fetch_time
-                    _last_fetch_time = time.time()
-
-                    company_rows = df_lr[df_lr["股票代码"] == code]
-                    if company_rows.empty:
-                        continue
-
-                    row = company_rows.iloc[0]
-
-                    quarter = {
-                        "period": period[:4] + "Q" + str((int(period[4:6]) - 1) // 3 + 1),
-                        "report_date": period,
-                        "revenue": _safe_float(row, "营业总收入"),
-                        "cost": _safe_float(row, "营业总支出-营业支出"),
-                        "net_profit": _safe_float(row, "净利润"),
-                        "operating_profit": _safe_float(row, "营业利润"),
-                    }
-
-                    # 资产负债表（可选，不阻塞）
+                # --- 利润表 ---
+                rows = _read_period_cache("lrb", period)
+                if rows is None:
                     try:
-                        df_bs = ak.stock_zcfz_em(date=period)
-                        _last_fetch_time = time.time()
-                        bs_rows = df_bs[df_bs["股票代码"] == code]
-                        if not bs_rows.empty:
-                            bs_row = bs_rows.iloc[0]
-                            quarter["total_assets"] = _safe_float(bs_row, "资产总计")
-                            quarter["equity"] = _safe_float(bs_row, "股东权益合计")
-                    except Exception:
-                        pass
+                        def _fetch_lrb():
+                            return ak.stock_lrb_em(date=period)
 
-                    quarters.append(quarter)
+                        df_lr = _retry_with_backoff(_fetch_lrb, max_retries=2, label=f"利润表 {period}")
+                        rows = df_lr.to_dict(orient="records")
+                        _write_period_cache("lrb", period, rows)
+                        logger.info(f"利润表 {period} 获取成功，{len(rows)} 条记录")
+                    except Exception as e:
+                        logger.warning(f"利润表 {period} 获取失败（已重试）: {e}")
+                        continue
+                else:
+                    logger.info(f"利润表 {period} 命中期缓存")
 
-                except Exception as e:
-                    logger.warning(f"获取 {code} {period} 利润表失败: {e}")
+                # 从全市场数据中查找目标公司
+                company_row = None
+                for row in rows:
+                    if str(row.get("股票代码", "")) == code:
+                        company_row = row
+                        break
+                if company_row is None:
+                    logger.info(f"公司 {code} 在 {period} 利润表中无数据（可能尚未披露）")
                     continue
+
+                quarter = {
+                    "period": period[:4] + "Q" + str((int(period[4:6]) - 1) // 3 + 1),
+                    "report_date": period,
+                    "revenue": _safe_float(company_row, "营业总收入"),
+                    "cost": _safe_float(company_row, "营业总支出-营业支出"),
+                    "net_profit": _safe_float(company_row, "净利润"),
+                    "operating_profit": _safe_float(company_row, "营业利润"),
+                }
+
+                # --- 资产负债表（可选） ---
+                bs_rows = _read_period_cache("bs", period)
+                if bs_rows is None:
+                    try:
+                        def _fetch_bs():
+                            return ak.stock_zcfz_em(date=period)
+
+                        df_bs = _retry_with_backoff(_fetch_bs, max_retries=1, label=f"资产负债表 {period}")
+                        bs_rows = df_bs.to_dict(orient="records")
+                        _write_period_cache("bs", period, bs_rows)
+                    except Exception:
+                        bs_rows = []
+
+                for bs_row in bs_rows:
+                    if str(bs_row.get("股票代码", "")) == code:
+                        quarter["total_assets"] = _safe_float(bs_row, "资产总计")
+                        quarter["equity"] = _safe_float(bs_row, "股东权益合计")
+                        break
+
+                quarters.append(quarter)
 
             result = {
                 "code": code,
@@ -450,18 +505,25 @@ def get_financial_data(code: str) -> dict:
                 "source": "api",
             }
             _write_cache(cache_key, {"data": result})
+            logger.info(f"公司 {code} 财务数据完成: {len(quarters)} 个季度")
             return result
 
         except ImportError:
             logger.error("akshare 未安装")
             raise
         except Exception as e:
-            _last_fetch_time = time.time()
+            _mark_fetch_time()
             logger.error(f"获取财务数据失败 {code}: {e}")
             expired = _read_cache_expired(cache_key)
             if expired and "data" in expired:
                 return expired["data"]
             return {"code": code, "quarters": [], "source": "api"}
+
+
+def _period_to_date(period_str: str):
+    """将报告期字符串 '20250331' 转为 datetime 对象"""
+    from datetime import datetime as dt
+    return dt.strptime(period_str, "%Y%m%d")
 
 
 def _calc_report_periods(today, count: int) -> list[str]:
@@ -687,12 +749,21 @@ def get_divergence_analysis(db, company_id: str, material_name: str = "") -> dic
     }
 
 
-def _safe_float(df_row, col_name: str) -> float | None:
-    """安全地从 DataFrame 行中提取浮点数"""
+def _safe_float(row, col_name: str) -> float | None:
+    """安全地从 DataFrame 行或 dict 中提取浮点数"""
     try:
-        if col_name not in df_row.index:
+        # DataFrame row: use .index to check column existence
+        if hasattr(row, "index"):
+            if col_name not in row.index:
+                return None
+        # Plain dict: use 'in' operator
+        elif isinstance(row, dict):
+            if col_name not in row:
+                return None
+        else:
             return None
-        val = df_row[col_name]
+
+        val = row[col_name]
         if pd.isna(val) or val == "-" or val == "":
             return None
         return float(val)

@@ -38,6 +38,7 @@ FINANCIAL_SYSTEM_PROMPT = """你是一位资深的中国注册会计师和财务
   "report_period": "报告期(如2024Q4或2024H1)",
   "revenue": 数字(元)或null,
   "cost": 数字(元)或null,
+  "net_profit": 数字(元)或null,
   "gross_margin": 数字(%)或null,
   "direct_material_pct": 数字(%)或null,
   "direct_labor_pct": 数字(%)或null,
@@ -51,37 +52,51 @@ FINANCIAL_SYSTEM_PROMPT = """你是一位资深的中国注册会计师和财务
 - 优先查找"报告期"、"会计期间"、"截至...止"等字样
 - 格式: YYYYQN (如2024Q4) 或 YYYYHN (如2024H1)
 
-### 营业收入 (revenue) 与 营业成本 (cost)
-- 查找合并利润表中的"营业收入"/"营业总收入"和"营业成本"/"营业总成本"
+### 营业收入 (revenue) — 必填，通常最容易找到
+- 查找合并利润表中的"营业收入"/"营业总收入"/"主营业务收入"
 - **单位转换**: 将所有金额统一转换为**元**
   - 如报表单位为"万元": 数值 × 10,000
   - 如报表单位为"亿元": 数值 × 100,000,000
   - 如报表单位为"元": 保持原值
-- 注意区分"营业总成本"(包含费用)和"营业成本"(不含费用)，我们取**营业成本**
+
+### 营业成本 (cost) — 必填
+- **优先级**: 合并利润表中的"营业成本" > "主营业务成本" > "营业总成本"
+- **重要**: "营业成本" ≠ "营业总成本"。营业总成本包含管理费用/销售费用/研发费用等，数值更大
+- 优先查找利润表中紧跟在营业收入下方的"营业成本"或"主营业务成本"行
+- 如果只找到"营业总成本"，请在raw_data中注明
+- **单位转换同上**
+
+### 净利润 (net_profit) — 必填
+- 查找合并利润表中的"净利润"/"归属于母公司股东的净利润"
+- 通常位于利润表底部
+- 注意区分"归属于母公司股东的净利润"和"少数股东损益"，取合并净利润（含少数股东）
+- **单位转换同上**
 
 ### 毛利率 (gross_margin)
 - 优先使用报表中直接给出的毛利率(%)
 - 若无直接数据: gross_margin = (revenue - cost) / revenue × 100
 - 保留1位小数
+- 如果revenue或cost为null则不计算
 
 ### 成本构成 (direct_material_pct / direct_labor_pct / manufacturing_pct)
 - 查找"营业成本构成"、"成本分析表"、"主营业务成本构成"等章节
 - 三大项通常为: 直接材料、直接人工、制造费用
 - 每项取**占营业成本的比例**(百分比)
-- 如报表未披露成本构成明细，全部填null
+- 如报表未披露成本构成明细，全部填null（这在A股中非常常见）
 - 注意这三个比例之和通常接近100%，但非强制
 
 ### raw_data
 - 包含提取到但无法归入上述字段的额外信息
-- 如: 前五大供应商集中度、存货金额、研发费用等
+- 如: 前五大供应商集中度、研发费用、存货金额、营业总成本(如与营业成本不同)等
 - 如无额外数据，填空对象 {}
 
 ## 重要原则:
 1. 只提取明确出现在文本中的数据，不要编造
 2. 不确定的字段填null，不要猜测
-3. 注意区分"合并报表"和"母公司报表"数据，优先取合并报表
+3. 合并报表 > 母公司报表
 4. 金额统一为元
-5. 输出纯JSON，不要用```json```包裹
+5. 优先取"归属于母公司所有者的净利润"作为net_profit
+6. 输出纯JSON，不要用```json```包裹
 """
 
 SYSTEM_PROMPT = """你是一位资深的中国金属/大宗商品行业分析师，专门研究A股上市公司的产业链位置和原材料敏感性。
@@ -409,6 +424,12 @@ def extract_financial_report(
             result = json.loads(json_text)
 
             # 验证并清洗数据
+            net_profit_val = _to_float_or_none(result.get("net_profit"))
+            raw_data = result.get("raw_data") if isinstance(result.get("raw_data"), dict) else {}
+            # 将 net_profit 同时存入 raw_data 以便后续读取
+            if net_profit_val is not None:
+                raw_data["net_profit"] = net_profit_val
+
             financial_data = {
                 "report_period": str(result.get("report_period", "")).strip() or None,
                 "revenue": _to_float_or_none(result.get("revenue")),
@@ -417,13 +438,15 @@ def extract_financial_report(
                 "direct_material_pct": _to_float_or_none(result.get("direct_material_pct")),
                 "direct_labor_pct": _to_float_or_none(result.get("direct_labor_pct")),
                 "manufacturing_pct": _to_float_or_none(result.get("manufacturing_pct")),
-                "raw_data": result.get("raw_data") if isinstance(result.get("raw_data"), dict) else {},
+                "raw_data": raw_data,
             }
 
             logger.info(
                 f"财务数据提取成功: {company_name}, "
                 f"report_period={financial_data['report_period']}, "
                 f"revenue={financial_data['revenue']}, "
+                f"cost={financial_data['cost']}, "
+                f"net_profit={net_profit_val}, "
                 f"gross_margin={financial_data['gross_margin']}%"
             )
             return financial_data

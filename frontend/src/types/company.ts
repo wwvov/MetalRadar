@@ -112,8 +112,10 @@ export interface FinancialData {
   direct_labor_pct: number | null
   manufacturing_pct: number | null
   gross_margin: number | null
+  net_margin: number | null
   revenue: number | null
   cost: number | null
+  net_profit: number | null
   report_period: string
 }
 
