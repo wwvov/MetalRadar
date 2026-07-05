@@ -119,14 +119,10 @@ export function CompanyPortrait({ company, onRegenerate, onDelete }: CompanyPort
     }
   }, [company.id, position, positionDetail, customPositionDetail, businessDesc, materials, queryClient])
 
-  // 同步后端返回的 chain_analysis
+  // 同步后端返回的 chain_analysis（公司切换时自动重置）
   useEffect(() => {
-    if (data?.chain_analysis) {
-      setChainAnalysis(data.chain_analysis)
-    } else if (chainAnalysis === undefined) {
-      setChainAnalysis(null)
-    }
-  }, [data?.chain_analysis])
+    setChainAnalysis(data?.chain_analysis ?? null)
+  }, [data?.chain_analysis, company.id])
 
   // AI分析产业链
   const handleAnalyzeChain = useCallback(async () => {
