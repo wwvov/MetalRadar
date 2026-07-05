@@ -34,6 +34,15 @@ export const companyService = {
     return data
   },
 
+  uploadReport: async (companyId: string, reportPdf: File): Promise<CompanyDetail> => {
+    const formData = new FormData()
+    formData.append('report_pdf', reportPdf)
+    const { data } = await api.post<CompanyDetail>(`/companies/${companyId}/upload-report`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return data
+  },
+
   regeneratePortrait: async (companyId: string, reportPdf?: File): Promise<CompanyDetail> => {
     const formData = new FormData()
     if (reportPdf) {

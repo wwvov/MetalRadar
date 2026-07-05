@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.services import company_service
 from app.services.llm_service import PortraitGenerationError
+from app.services.pdf_parser import extract_text_from_pdf
 from app.schemas.company import CompanySearchResult, CompanyDetailOut, PortraitUpdateIn
 
 logger = logging.getLogger(__name__)
@@ -94,9 +95,13 @@ async def init_company(
     if report_pdf:
         content = await report_pdf.read()
         try:
-            report_text = content.decode("utf-8", errors="ignore")
-        except Exception:
-            report_text = str(content)
+            report_text = extract_text_from_pdf(content)
+            if not report_text.strip():
+                logger.warning(f"上传的PDF未提取到文本内容（可能是扫描件/图片PDF）")
+                report_text = None
+        except ValueError as e:
+            logger.warning(f"PDF解析失败: {e}")
+            report_text = None
 
     try:
         return company_service.init_company_profile(db, company_code, report_text, company_name)
@@ -126,13 +131,55 @@ async def regenerate_portrait(
     if report_pdf:
         content = await report_pdf.read()
         try:
-            report_text = content.decode("utf-8", errors="ignore")
-        except Exception:
-            report_text = str(content)
+            report_text = extract_text_from_pdf(content)
+            if not report_text.strip():
+                logger.warning(f"上传的PDF未提取到文本内容（可能是扫描件/图片PDF）")
+                report_text = None
+        except ValueError as e:
+            logger.warning(f"PDF解析失败: {e}")
+            report_text = None
 
     try:
         return company_service.regenerate_company_portrait(db, company_id, report_text)
     except PortraitGenerationError as e:
         raise HTTPException(status_code=502, detail=f"AI服务暂时不可用: {str(e)}")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/{company_id}/upload-report", response_model=CompanyDetailOut)
+async def upload_financial_report(
+    company_id: str,
+    report_pdf: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """上传财报PDF — 仅提取财务数据，不重新生成画像"""
+    # 解析 PDF
+    content = await report_pdf.read()
+    try:
+        report_text = extract_text_from_pdf(content)
+        if not report_text.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="PDF未提取到文本内容，可能是扫描件/图片PDF，请上传包含文字层的PDF文件",
+            )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # 调用 LLM 提取财务数据
+    try:
+        from app.services.llm_service import extract_financial_report, FinancialExtractionError
+        financial_data = extract_financial_report(report_text, company_id)
+    except FinancialExtractionError as e:
+        raise HTTPException(status_code=502, detail=f"AI财报分析失败: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"财报分析异常: {str(e)}")
+
+    if not financial_data.get("report_period"):
+        raise HTTPException(status_code=422, detail="AI未能从PDF中识别到有效的报告期信息")
+
+    # 保存到数据库
+    try:
+        return company_service.save_financial_report(db, company_id, financial_data)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

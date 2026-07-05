@@ -24,6 +24,9 @@ import {
   Plus,
   X,
   Upload,
+  Loader2,
+  FileText,
+  AlertCircle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { CompanyBasic, CompanyMaterial } from '@/types/company'
@@ -63,6 +66,10 @@ export function CompanyPortrait({ company, onRegenerate, onDelete }: CompanyPort
   const [regenerating, setRegenerating] = useState(false)
   const [regenError, setRegenError] = useState('')
   const [reportFile, setReportFile] = useState<File | null>(null)
+
+  // 独立财报上传状态（不进入编辑模式）
+  const [uploadingReport, setUploadingReport] = useState(false)
+  const [uploadReportError, setUploadReportError] = useState('')
 
   // 可编辑字段
   const [position, setPosition] = useState('')
@@ -134,6 +141,22 @@ export function CompanyPortrait({ company, onRegenerate, onDelete }: CompanyPort
       setRegenerating(false)
     }
   }, [company.id, reportFile, queryClient, onRegenerate])
+
+  // 独立上传财报（不进入编辑模式，不重新生成画像）
+  const handleReportUpload = useCallback(async (file: File) => {
+    setUploadingReport(true)
+    setUploadReportError('')
+    try {
+      await companyService.uploadReport(company.id, file)
+      queryClient.invalidateQueries({ queryKey: ['company-detail', company.id] })
+      setReportFile(null)
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail
+      setUploadReportError(detail || err?.message || '财报上传失败，请检查网络连接')
+    } finally {
+      setUploadingReport(false)
+    }
+  }, [company.id, queryClient])
 
   // 品种操作
   const handleAddMaterial = () => {
@@ -519,10 +542,10 @@ export function CompanyPortrait({ company, onRegenerate, onDelete }: CompanyPort
             财报基准数据
             <Badge variant="secondary" className="text-[10px] bg-slate-100 text-slate-500 border-0">只读</Badge>
           </h3>
-          <p className="text-xs text-slate-400 mb-3">
+          <p className="text-xs text-slate-400 mb-3 flex items-center gap-2">
             数据对应报告期：{financial_summary.report_period}
             {reportFile && (
-              <span className="ml-2 text-emerald-600 flex items-center gap-1">
+              <span className="text-emerald-600 flex items-center gap-1">
                 <Upload className="w-3 h-3" />
                 新财报已上传
               </span>
@@ -570,30 +593,86 @@ export function CompanyPortrait({ company, onRegenerate, onDelete }: CompanyPort
               </p>
             </div>
           </div>
+          {/* 替换财报 — 独立上传，不进入编辑模式 */}
+          <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2">
+            {uploadingReport ? (
+              <span className="text-xs text-blue-600 flex items-center gap-1">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                AI 正在分析财报...
+              </span>
+            ) : (
+              <label className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-blue-600 cursor-pointer transition-colors">
+                <FileText className="w-3 h-3" />
+                上传新财报覆盖
+                <input
+                  type="file"
+                  accept=".pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) handleReportUpload(file)
+                  }}
+                />
+              </label>
+            )}
+            {uploadReportError && (
+              <span className="text-xs text-red-500 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                {uploadReportError}
+              </span>
+            )}
+          </div>
         </Card>
       )}
 
-      {/* 无财报时显示上传引导 */}
+      {/* 无财报时显示上传引导 — 支持直接上传，不跳转编辑模式 */}
       {!financial_summary && (
         <Card className="p-5 bg-slate-50 border-dashed">
-          <div className="text-center py-4">
-            <Upload className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-            <p className="text-sm text-slate-500 mb-2">暂无财报数据</p>
-            <p className="text-xs text-slate-400 mb-3">
-              上传财报PDF可获取更精准的成本结构分析
-            </p>
-            {!editing && (
+          {uploadingReport ? (
+            <div className="text-center py-6">
+              <div className="relative w-10 h-10 mx-auto mb-3">
+                <div className="absolute inset-0 rounded-full border-3 border-blue-100" />
+                <div className="absolute inset-0 rounded-full border-3 border-blue-500 border-t-transparent animate-spin" />
+                <Loader2 className="absolute inset-0 m-auto w-5 h-5 text-blue-600 animate-spin" />
+              </div>
+              <p className="text-sm font-medium text-slate-700 mb-1">正在分析财报...</p>
+              <p className="text-xs text-slate-400">AI 正在提取财务数据，请稍候</p>
+            </div>
+          ) : uploadReportError ? (
+            <div className="text-center py-4">
+              <AlertCircle className="w-8 h-8 text-red-400 mx-auto mb-2" />
+              <p className="text-sm text-red-600 mb-2">{uploadReportError}</p>
               <Button
                 variant="outline"
                 size="sm"
                 className="h-8 text-xs"
-                onClick={handleStartEdit}
+                onClick={() => setUploadReportError('')}
               >
-                <Upload className="w-3.5 h-3.5 mr-1" />
-                去上传财报
+                重试
               </Button>
-            )}
-          </div>
+            </div>
+          ) : (
+            <div className="text-center py-4">
+              <Upload className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+              <p className="text-sm text-slate-500 mb-2">暂无财报数据</p>
+              <p className="text-xs text-slate-400 mb-3">
+                上传财报PDF可获取更精准的成本结构分析
+              </p>
+              <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 hover:border-slate-400 cursor-pointer transition-colors">
+                <Upload className="w-3.5 h-3.5" />
+                上传财报PDF
+                <input
+                  type="file"
+                  accept=".pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) handleReportUpload(file)
+                  }}
+                />
+              </label>
+            </div>
+          )}
         </Card>
       )}
     </div>

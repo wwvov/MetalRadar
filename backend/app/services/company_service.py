@@ -289,6 +289,60 @@ def init_company_profile(
     if company_info:
         industry_hint = company_info.get("industry", "")
 
+    # --- 提取并持久化财报数据（如有上传 PDF） ---
+    if report_text and report_text.strip():
+        try:
+            from app.services.llm_service import extract_financial_report, FinancialExtractionError
+            financial_data = extract_financial_report(
+                report_text,
+                company_name,
+                timeout=llm_timeout,
+                max_retries=llm_retries,
+            )
+
+            if financial_data.get("report_period"):
+                # Upsert: 同公司+同报告期 → 更新而非重复创建
+                existing_report = (
+                    db.query(FinancialReport)
+                    .filter(
+                        FinancialReport.company_id == company_code,
+                        FinancialReport.report_period == financial_data["report_period"],
+                    )
+                    .first()
+                )
+
+                if existing_report:
+                    existing_report.revenue = financial_data.get("revenue")
+                    existing_report.cost = financial_data.get("cost")
+                    existing_report.gross_margin = financial_data.get("gross_margin")
+                    existing_report.direct_material_pct = financial_data.get("direct_material_pct")
+                    existing_report.direct_labor_pct = financial_data.get("direct_labor_pct")
+                    existing_report.manufacturing_pct = financial_data.get("manufacturing_pct")
+                    existing_report.raw_data = financial_data.get("raw_data")
+                    logger.info(f"已更新财报记录: {company_name} {financial_data['report_period']}")
+                else:
+                    report_record = FinancialReport(
+                        company_id=company_code,
+                        report_period=financial_data["report_period"],
+                        revenue=financial_data.get("revenue"),
+                        cost=financial_data.get("cost"),
+                        gross_margin=financial_data.get("gross_margin"),
+                        direct_material_pct=financial_data.get("direct_material_pct"),
+                        direct_labor_pct=financial_data.get("direct_labor_pct"),
+                        manufacturing_pct=financial_data.get("manufacturing_pct"),
+                        raw_data=financial_data.get("raw_data"),
+                    )
+                    db.add(report_record)
+                    logger.info(f"已保存财报记录: {company_name} {financial_data['report_period']}")
+            else:
+                logger.warning(f"财报数据提取未返回 report_period: {company_name}")
+
+        except FinancialExtractionError as e:
+            logger.warning(f"财报数据提取失败（不影响画像生成）: {company_name}: {e}")
+        except Exception as e:
+            logger.error(f"财报数据提取异常: {company_name}: {type(e).__name__}: {e}")
+    # --- 财报提取结束 ---
+
     # 调用大模型生成画像 — 失败时抛出 PortraitGenerationError
     logger.info(f"正在为 {company_name}({company_code}) 生成AI画像...")
     portrait_data = generate_company_portrait(
@@ -454,6 +508,58 @@ def regenerate_company_portrait(
     db.commit()
 
     return init_company_profile(db, company_code, report_text)
+
+
+def save_financial_report(
+    db: Session, company_code: str, financial_data: dict
+) -> CompanyDetailOut:
+    """保存财报数据 — 仅写入 financial_reports 表，不修改画像"""
+    company = db.query(Company).filter(Company.id == company_code).first()
+    if not company:
+        raise ValueError(f"公司 {company_code} 不存在")
+
+    report_period = financial_data.get("report_period")
+    if not report_period:
+        raise ValueError("缺少 report_period")
+
+    # Upsert: 同公司+同报告期 → 更新
+    existing_report = (
+        db.query(FinancialReport)
+        .filter(
+            FinancialReport.company_id == company_code,
+            FinancialReport.report_period == report_period,
+        )
+        .first()
+    )
+
+    if existing_report:
+        existing_report.revenue = financial_data.get("revenue")
+        existing_report.cost = financial_data.get("cost")
+        existing_report.gross_margin = financial_data.get("gross_margin")
+        existing_report.direct_material_pct = financial_data.get("direct_material_pct")
+        existing_report.direct_labor_pct = financial_data.get("direct_labor_pct")
+        existing_report.manufacturing_pct = financial_data.get("manufacturing_pct")
+        existing_report.raw_data = financial_data.get("raw_data")
+        logger.info(f"已更新财报记录: {company.name} {report_period}")
+    else:
+        report_record = FinancialReport(
+            company_id=company_code,
+            report_period=report_period,
+            revenue=financial_data.get("revenue"),
+            cost=financial_data.get("cost"),
+            gross_margin=financial_data.get("gross_margin"),
+            direct_material_pct=financial_data.get("direct_material_pct"),
+            direct_labor_pct=financial_data.get("direct_labor_pct"),
+            manufacturing_pct=financial_data.get("manufacturing_pct"),
+            raw_data=financial_data.get("raw_data"),
+        )
+        db.add(report_record)
+        logger.info(f"已保存财报记录: {company.name} {report_period}")
+
+    db.commit()
+    db.refresh(company)
+
+    return get_company_detail(db, company_code)
 
 
 def get_user_follows(db: Session, user_id: str) -> list[CompanyBasic]:

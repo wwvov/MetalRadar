@@ -60,6 +60,33 @@ CONTRACT_MAP: dict[str, str] = {
     "纯碱": "SA0",
 }
 
+# 品种名 → 价格单位（与 CONTRACT_MAP 保持键一致）
+UNIT_MAP: dict[str, str] = {
+    # 上期所 — 有色金属 (元/吨)
+    "铜": "元/吨", "电解铜": "元/吨", "阴极铜": "元/吨", "铜箔": "元/吨",
+    "铝": "元/吨", "电解铝": "元/吨", "氧化铝": "元/吨",
+    "锌": "元/吨", "铅": "元/吨",
+    "镍": "元/吨", "电解镍": "元/吨", "硫酸镍": "元/吨",
+    "锡": "元/吨",
+    # 上期所 — 贵金属 (元/克, 元/千克)
+    "黄金": "元/克", "金": "元/克",
+    "白银": "元/千克", "银": "元/千克",
+    # 上期所 — 黑色 (元/吨)
+    "螺纹钢": "元/吨", "热卷": "元/吨", "热轧卷板": "元/吨",
+    "不锈钢": "元/吨",
+    "橡胶": "元/吨", "天然橡胶": "元/吨",
+    "沥青": "元/吨", "燃料油": "元/吨",
+    "纸浆": "元/吨",
+    # 大商所 (元/吨)
+    "铁矿石": "元/吨", "焦煤": "元/吨", "焦炭": "元/吨",
+    # 广期所 (元/吨)
+    "碳酸锂": "元/吨", "锂": "元/吨", "锂精矿": "元/吨", "氢氧化锂": "元/吨",
+    "工业硅": "元/吨", "硅": "元/吨",
+    # 能化
+    "原油": "元/桶",
+    "玻璃": "元/吨", "纯碱": "元/吨",
+}
+
 
 def _ensure_cache_dir():
     os.makedirs(CACHE_DIR, exist_ok=True)
@@ -192,6 +219,17 @@ def _get_symbol(material_name: str, contract: str = "") -> str | None:
         if clean:
             return f"{clean}0"
     return None
+
+
+def _get_unit(material_name: str) -> str:
+    """解析品种名 → 价格单位"""
+    if material_name in UNIT_MAP:
+        return UNIT_MAP[material_name]
+    # 模糊匹配
+    for key, unit in UNIT_MAP.items():
+        if key in material_name or material_name in key:
+            return unit
+    return ""
 
 
 def get_futures_quote(material_name: str, contract: str = "") -> dict | None:
@@ -464,6 +502,7 @@ def get_dashboard_data(db, company_id: str) -> dict:
 
         result_materials.append({
             "material_name": m.material_name,
+            "unit": _get_unit(m.material_name),
             "cost_pct": float(m.cost_pct) if m.cost_pct else None,
             "direction": m.direction or "negative",
             "contract": contract_code,
@@ -549,7 +588,8 @@ def get_overview_data(db) -> dict:
         symbol = _get_symbol(name, info["contract"])
 
         quote = None
-        percentile = None
+        percentile_1y = None
+        percentile_2y = None
         history_3m = []
 
         if symbol and symbol in symbol_to_df and not symbol_to_df[symbol].empty:
@@ -565,6 +605,7 @@ def get_overview_data(db) -> dict:
 
         overview_metals.append({
             "material_name": name,
+            "unit": _get_unit(name),
             "contract": info["contract"],
             "quote": quote,
             "percentile_1y": percentile_1y,

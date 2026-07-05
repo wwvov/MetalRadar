@@ -13,6 +13,77 @@ class PortraitGenerationError(Exception):
     """LLM 画像生成失败异常 — 区别于配置错误，表示运行时调用失败"""
     pass
 
+
+class FinancialExtractionError(Exception):
+    """LLM 财报数据提取失败异常 — 表示运行时调用失败"""
+    pass
+
+
+def _to_float_or_none(value) -> float | None:
+    """安全地将 LLM 返回的值转换为 float，无法转换时返回 None"""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
+FINANCIAL_SYSTEM_PROMPT = """你是一位资深的中国注册会计师和财务分析师，专门从A股上市公司年报/半年报中提取结构化财务数据。
+
+你的任务是阅读财报文本，提取关键财务指标并输出JSON。请严格输出JSON，不要添加任何解释文字。
+
+## JSON格式要求:
+{
+  "report_period": "报告期(如2024Q4或2024H1)",
+  "revenue": 数字(元)或null,
+  "cost": 数字(元)或null,
+  "gross_margin": 数字(%)或null,
+  "direct_material_pct": 数字(%)或null,
+  "direct_labor_pct": 数字(%)或null,
+  "manufacturing_pct": 数字(%)或null,
+  "raw_data": {}
+}
+
+## 数据提取指南:
+
+### 报告期 (report_period)
+- 优先查找"报告期"、"会计期间"、"截至...止"等字样
+- 格式: YYYYQN (如2024Q4) 或 YYYYHN (如2024H1)
+
+### 营业收入 (revenue) 与 营业成本 (cost)
+- 查找合并利润表中的"营业收入"/"营业总收入"和"营业成本"/"营业总成本"
+- **单位转换**: 将所有金额统一转换为**元**
+  - 如报表单位为"万元": 数值 × 10,000
+  - 如报表单位为"亿元": 数值 × 100,000,000
+  - 如报表单位为"元": 保持原值
+- 注意区分"营业总成本"(包含费用)和"营业成本"(不含费用)，我们取**营业成本**
+
+### 毛利率 (gross_margin)
+- 优先使用报表中直接给出的毛利率(%)
+- 若无直接数据: gross_margin = (revenue - cost) / revenue × 100
+- 保留1位小数
+
+### 成本构成 (direct_material_pct / direct_labor_pct / manufacturing_pct)
+- 查找"营业成本构成"、"成本分析表"、"主营业务成本构成"等章节
+- 三大项通常为: 直接材料、直接人工、制造费用
+- 每项取**占营业成本的比例**(百分比)
+- 如报表未披露成本构成明细，全部填null
+- 注意这三个比例之和通常接近100%，但非强制
+
+### raw_data
+- 包含提取到但无法归入上述字段的额外信息
+- 如: 前五大供应商集中度、存货金额、研发费用等
+- 如无额外数据，填空对象 {}
+
+## 重要原则:
+1. 只提取明确出现在文本中的数据，不要编造
+2. 不确定的字段填null，不要猜测
+3. 注意区分"合并报表"和"母公司报表"数据，优先取合并报表
+4. 金额统一为元
+5. 输出纯JSON，不要用```json```包裹
+"""
+
 SYSTEM_PROMPT = """你是一位资深的中国金属/大宗商品行业分析师，专门研究A股上市公司的产业链位置和原材料敏感性。
 
 你的任务是分析给定公司，生成结构化的JSON画像数据。请严格输出JSON，不要添加任何解释文字。
@@ -267,3 +338,109 @@ def _fallback_portrait(company_name: str, company_code: str) -> dict:
         "position_detail": "待AI分析",
         "materials": [],
     }
+
+
+def extract_financial_report(
+    report_text: str,
+    company_name: str,
+    *,
+    timeout: float = 60,
+    max_retries: int = 2,
+) -> dict:
+    """调用大模型从财报文本中提取结构化财务数据
+
+    Args:
+        report_text: 从 PDF 提取的财报文本内容
+        company_name: 公司名称（用于日志）
+        timeout: 单次 LLM 调用超时秒数
+        max_retries: 最大重试次数
+
+    Returns:
+        dict with keys: report_period, revenue, cost, gross_margin,
+                        direct_material_pct, direct_labor_pct, manufacturing_pct, raw_data
+
+    Raises:
+        FinancialExtractionError: LLM 调用失败
+    """
+    if not settings.LLM_API_KEY:
+        logger.warning("LLM_API_KEY 未配置，跳过财报数据提取")
+        return {
+            "report_period": None, "revenue": None, "cost": None,
+            "gross_margin": None, "direct_material_pct": None,
+            "direct_labor_pct": None, "manufacturing_pct": None, "raw_data": {},
+        }
+
+    # 截断文本到 8000 字符（财报文本可能很长）
+    truncated = report_text[:8000] if len(report_text) > 8000 else report_text
+
+    user_prompt = (
+        f"请从以下财报文本中提取结构化财务数据:\n\n"
+        f"公司名称: {company_name}\n\n"
+        f"=== 财报文本（节选） ===\n"
+        f"{truncated}\n"
+        f"=== 文本结束 ==="
+    )
+
+    client = _get_openai_client()
+    logger.info(f"调用 LLM 提取财务数据: company={company_name}, timeout={timeout}s")
+
+    last_error = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"财务提取 LLM 调用尝试 {attempt}/{max_retries}")
+
+            response = client.chat.completions.create(
+                model=settings.LLM_MODEL,
+                messages=[
+                    {"role": "system", "content": FINANCIAL_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.1,
+                max_tokens=1500,
+                response_format={"type": "json_object"},
+                timeout=timeout,
+            )
+
+            raw_content = response.choices[0].message.content or ""
+            logger.info(f"财务提取 LLM 原始响应(前300字符): {raw_content[:300]}")
+
+            json_text = _extract_json(raw_content)
+            result = json.loads(json_text)
+
+            # 验证并清洗数据
+            financial_data = {
+                "report_period": str(result.get("report_period", "")).strip() or None,
+                "revenue": _to_float_or_none(result.get("revenue")),
+                "cost": _to_float_or_none(result.get("cost")),
+                "gross_margin": _to_float_or_none(result.get("gross_margin")),
+                "direct_material_pct": _to_float_or_none(result.get("direct_material_pct")),
+                "direct_labor_pct": _to_float_or_none(result.get("direct_labor_pct")),
+                "manufacturing_pct": _to_float_or_none(result.get("manufacturing_pct")),
+                "raw_data": result.get("raw_data") if isinstance(result.get("raw_data"), dict) else {},
+            }
+
+            logger.info(
+                f"财务数据提取成功: {company_name}, "
+                f"report_period={financial_data['report_period']}, "
+                f"revenue={financial_data['revenue']}, "
+                f"gross_margin={financial_data['gross_margin']}%"
+            )
+            return financial_data
+
+        except json.JSONDecodeError as e:
+            last_error = e
+            logger.warning(f"财务提取尝试 {attempt}/{max_retries} JSON 解析失败: {e}")
+        except Exception as e:
+            last_error = e
+            logger.warning(f"财务提取尝试 {attempt}/{max_retries} 失败: {type(e).__name__}: {e}")
+
+        if attempt < max_retries:
+            wait = 2 ** attempt
+            logger.info(f"等待 {wait}s 后重试...")
+            time.sleep(wait)
+
+    raise FinancialExtractionError(
+        f"财报数据提取失败（{max_retries} 次重试后仍失败）: "
+        f"{type(last_error).__name__}: {last_error}"
+    )

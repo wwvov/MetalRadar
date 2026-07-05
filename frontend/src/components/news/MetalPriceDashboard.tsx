@@ -28,20 +28,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import type { CompanyBasic } from '@/types/company'
 import type { DashboardMaterial, OverviewMetal, PricePercentile, FuturesQuote } from '@/types/futures'
 
-// ===== 品种名 → 单位 =====
-const UNIT_MAP: Record<string, string> = {
-  '铜': '元/吨', '铝': '元/吨', '锌': '元/吨', '铅': '元/吨',
-  '镍': '元/吨', '锡': '元/吨', '黄金': '元/克', '白银': '元/千克',
-  '螺纹钢': '元/吨', '热卷': '元/吨', '不锈钢': '元/吨',
-  '铁矿石': '元/吨', '焦煤': '元/吨', '焦炭': '元/吨',
-  '碳酸锂': '元/吨', '工业硅': '元/吨',
-  '原油': '元/桶', '沥青': '元/吨', '燃料油': '元/吨',
-  '橡胶': '元/吨', '纸浆': '元/吨', '玻璃': '元/吨', '纯碱': '元/吨',
-}
-
 // ===== 价格格式化 =====
-function fmtPrice(v: number, material: string): string {
-  const unit = UNIT_MAP[material] || ''
+function fmtPrice(v: number, unit: string): string {
   if (Math.abs(v) >= 10000) {
     return `${(v / 10000).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}万${unit ? ' ' + unit : ''}`
   }
@@ -99,7 +87,7 @@ function MiniLineChart({ data, width = 200, height = 48 }: { data: { date: strin
 }
 
 // ===== 报价区 =====
-function QuoteSection({ material, quote }: { material: string; quote: FuturesQuote }) {
+function QuoteSection({ material, unit, quote }: { material: string; unit: string; quote: FuturesQuote }) {
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
@@ -120,12 +108,12 @@ function QuoteSection({ material, quote }: { material: string; quote: FuturesQuo
         </span>
       </div>
       <p className="text-[20px] font-semibold tabular-nums text-slate-900">
-        {fmtPrice(quote.price, material)}
+        {fmtPrice(quote.price, unit)}
       </p>
       <div className="grid grid-cols-2 gap-2 text-[11px]">
         <div className="bg-slate-50 rounded px-2 py-1.5">
           <span className="text-slate-400">今开</span>
-          <span className="float-right font-medium tabular-nums">{fmtPrice(quote.open, material)}</span>
+          <span className="float-right font-medium tabular-nums">{fmtPrice(quote.open, unit)}</span>
         </div>
         <div className="bg-slate-50 rounded px-2 py-1.5">
           <span className="text-slate-400">合约</span>
@@ -133,11 +121,11 @@ function QuoteSection({ material, quote }: { material: string; quote: FuturesQuo
         </div>
         <div className="bg-slate-50 rounded px-2 py-1.5">
           <span className="text-slate-400">最高</span>
-          <span className="float-right font-medium tabular-nums text-rose-600">{fmtPrice(quote.high, material)}</span>
+          <span className="float-right font-medium tabular-nums text-rose-600">{fmtPrice(quote.high, unit)}</span>
         </div>
         <div className="bg-slate-50 rounded px-2 py-1.5">
           <span className="text-slate-400">最低</span>
-          <span className="float-right font-medium tabular-nums text-emerald-600">{fmtPrice(quote.low, material)}</span>
+          <span className="float-right font-medium tabular-nums text-emerald-600">{fmtPrice(quote.low, unit)}</span>
         </div>
         <div className="bg-slate-50 rounded px-2 py-1.5">
           <span className="text-slate-400">成交量</span>
@@ -216,8 +204,8 @@ function PressureBar({ material }: { material: DashboardMaterial }) {
         <TooltipContent side="bottom" className="text-[11px] max-w-[240px]">
           <div className="space-y-1">
             <p><strong>成本占比:</strong> {material.cost_pct ?? '?'}%</p>
-            <p><strong>基准价:</strong> {p.base_price ? fmtPrice(p.base_price, material.material_name) : '未设定'}</p>
-            <p><strong>当前价:</strong> {fmtPrice(p.current_price, material.material_name)}</p>
+            <p><strong>基准价:</strong> {p.base_price ? fmtPrice(p.base_price, material.unit) : '未设定'}</p>
+            <p><strong>当前价:</strong> {fmtPrice(p.current_price, material.unit)}</p>
           </div>
         </TooltipContent>
       </Tooltip>
@@ -229,7 +217,7 @@ function PressureBar({ material }: { material: DashboardMaterial }) {
       </div>
 
       <p className="text-[11px] text-slate-500">
-        较基准价{p.base_price ? fmtPrice(p.base_price, material.material_name) : '(未设定)'}
+        较基准价{p.base_price ? fmtPrice(p.base_price, material.unit) : '(未设定)'}
         {' '}涨跌{p.change_pct > 0 ? '+' : ''}{p.change_pct}%
       </p>
     </div>
@@ -241,10 +229,12 @@ function PercentileThermometer({
   percentile,
   period,
   onTogglePeriod,
+  unit = '',
 }: {
   percentile: PricePercentile | null
   period: 252 | 504
   onTogglePeriod: () => void
+  unit?: string
 }) {
   if (!percentile) return <div className="text-xs text-slate-400">等待行情数据...</div>
 
@@ -280,8 +270,8 @@ function PercentileThermometer({
         </div>
       </div>
       <div className="flex justify-between text-[10px] text-slate-400">
-        <span>低 {fmtPrice(year_low, '')}</span>
-        <span>高 {fmtPrice(year_high, '')}</span>
+        <span>低 {fmtPrice(year_low, unit)}</span>
+        <span>高 {fmtPrice(year_high, unit)}</span>
       </div>
       <p className={cn('text-[11px] rounded px-2 py-1', levelBg[level])}>{levelText[level]}</p>
     </div>
@@ -579,7 +569,7 @@ export function MetalPriceDashboard({ follows, className }: Props) {
               <div className="p-4 space-y-4 flex-1 overflow-y-auto">
                 {/* 报价区 */}
                 {activeOverviewMetal.quote ? (
-                  <QuoteSection material={activeOverviewMetal.material_name} quote={activeOverviewMetal.quote} />
+                  <QuoteSection material={activeOverviewMetal.material_name} unit={activeOverviewMetal.unit} quote={activeOverviewMetal.quote} />
                 ) : (
                   <div className="text-[12px] text-slate-400 py-4 text-center bg-slate-50 rounded-lg">
                     暂无 {activeOverviewMetal.material_name} 期货报价
@@ -622,6 +612,7 @@ export function MetalPriceDashboard({ follows, className }: Props) {
                 {activeOverviewMetal.quote && (
                   <PressureBar material={{
                     material_name: activeOverviewMetal.material_name,
+                    unit: activeOverviewMetal.unit,
                     cost_pct: null,
                     direction: 'negative',
                     contract: activeOverviewMetal.contract,
@@ -645,6 +636,7 @@ export function MetalPriceDashboard({ follows, className }: Props) {
                     percentile={percentilePeriod === 252 ? activeOverviewMetal.percentile_1y! : activeOverviewMetal.percentile_2y!}
                     period={percentilePeriod}
                     onTogglePeriod={() => setPercentilePeriod(p => p === 252 ? 504 : 252)}
+                    unit={activeOverviewMetal.unit}
                   />
                 )}
 
@@ -717,7 +709,7 @@ export function MetalPriceDashboard({ follows, className }: Props) {
                 <div className="p-4 space-y-4 flex-1 overflow-y-auto">
                   {/* 报价区 */}
                   {activeMaterial.quote ? (
-                    <QuoteSection material={activeMaterial.material_name} quote={activeMaterial.quote} />
+                    <QuoteSection material={activeMaterial.material_name} unit={activeMaterial.unit} quote={activeMaterial.quote} />
                   ) : (
                     <div className="text-[12px] text-slate-400 py-4 text-center bg-slate-50 rounded-lg">
                       暂无 {activeMaterial.material_name} 期货报价
@@ -736,6 +728,7 @@ export function MetalPriceDashboard({ follows, className }: Props) {
                       percentile={percentilePeriod === 252 ? activeMaterial.percentile_1y! : activeMaterial.percentile_2y!}
                       period={percentilePeriod}
                       onTogglePeriod={() => setPercentilePeriod(p => p === 252 ? 504 : 252)}
+                      unit={activeMaterial.unit}
                     />
                   )}
 

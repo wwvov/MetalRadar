@@ -44,6 +44,7 @@ export interface PressureData {
 
 export interface DashboardMaterial {
   material_name: string
+  unit: string
   cost_pct: number | null
   direction: 'negative' | 'positive'
   contract: string
@@ -73,6 +74,7 @@ export interface DashboardResponse {
 
 export interface OverviewMetal {
   material_name: string
+  unit: string
   contract: string
   quote: FuturesQuote | null
   percentile_1y: PricePercentile | null
