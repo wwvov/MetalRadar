@@ -15,7 +15,7 @@ Base URL: `/api`
 ## 新闻相关 ✅
 
 ### 前端调用接口
-- `GET /news?tab=all|followed_companies|sensitive_metals|macro|macro_panel|shmet_block&company=&metal=&companies=&metals=&metal_category=&source=&page=`
+- `GET /news?tab=all|followed_companies|sensitive_metals|macro|macro_panel|shmet_block|favorites&company=&metal=&companies=&metals=&metal_category=&source=&page=`
   → `{ news: NewsItem[], total }`
 
   后端从多个新闻源聚合，经实体识别、去重、LLM分类后统一返回。
@@ -29,6 +29,7 @@ Base URL: `/api`
   | `macro` | 纯宏观/政策类（关联度 gray，排除上海金属网） |
   | `macro_panel` | 宏观快讯面板（无公司+无金属实体的纯宏观新闻，最多15条） |
   | `shmet_block` | 上海金属网专属区块（可按 metal_category=贵金属\|小金属 筛选） |
+  | `favorites` | 用户收藏夹：直接查 UserFavorite 表返回全部收藏新闻，不过滤来源，最多100条 |
 
 - `POST /news/{id}/favorite` body: `{ linked_company_id? }`
 - `POST /news/{id}/read`
@@ -98,6 +99,9 @@ Base URL: `/api`
 - `GET /companies/{id}/divergence`
   → 股票 vs 期货价格背离分析（60日滚动相关系数 + AI解读文本）。
 
+- `POST /companies/{id}/analyze-chain`
+  → 使用 LLM 分析公司在产业链中的完整位置，生成全景流程图(Mermaid)、各环节业务说明、位置总结。结果缓存到 `company.chain_analysis` JSON 字段。
+
 ### 后端数据源（供后端实现参考）
 | 来源 | 底层接口 | 说明 |
 |------|---------|------|
@@ -155,11 +159,15 @@ Base URL: `/api`
 
 ---
 
-## 股票K线 ✅
+## 股票 ✅
 
-- `GET /stocks/{code}/kline?frequency=daily&from=&to=&adjustflag=2`
+- `GET /stocks/{code}/kline?frequency=daily&from=&to=&adjust=`
   → `{ data: [{date, open, high, low, close, volume, amount, turn, pctChg, ...}] }`
-  数据源：BaoStock `query_history_k_data_plus`，默认前复权。
+  数据源：新浪财经 `stock_zh_a_daily` → 东财 `stock_zh_a_hist` 兜底，默认前复权。
+
+- `GET /stocks/{code}/info`
+  → `{ data: {code, total_market_cap, circulating_market_cap, industry, total_shares, circulating_shares, pe, pb} }`
+  数据源：东财全市场行情 `stock_zh_a_spot_em`（PE/PB/市值），`stock_individual_info_em` 兜底。
 
 ---
 

@@ -6,13 +6,13 @@
 |------|------|------|
 | 前端框架 | React 19 + TypeScript (strict) + Vite 6 | SPA 模式，react-router-dom v7 |
 | UI | TailwindCSS v4 + shadcn/ui | 禁用 Element Plus / Ant Design |
-| 图表 | ECharts (echarts-for-react) | 所有图表组件接收数据 props |
+| 图表 | ECharts (echarts-for-react) + Mermaid | 所有图表组件接收数据 props |
 | 状态管理 | React Query v5 + React Context | 组件不直接 fetch |
 | 后端框架 | Python 3.10+ / FastAPI | uvicorn ASGI 服务器 |
 | ORM | SQLAlchemy 2.0 | JSON 列自动序列化 |
 | 数据库 | SQLite 3 (WAL模式) | 开发环境，生产可切 PostgreSQL |
 | 缓存 | JSON 文件缓存 (`.cache/`) | Redis 可选（`REDIS_ENABLED=false`） |
-| AI | DeepSeek API (OpenAI 兼容) | `deepseek-chat` 模型 |
+| AI | DeepSeek API (OpenAI 兼容) | `deepseek-chat` 模型，3项 LLM 能力 |
 | 数据源 | akshare | 金融数据接口封装 |
 
 ## 全局约束
@@ -24,11 +24,30 @@
 - 不允许频繁调取数据源的 API，避免反爬机制。
 - 后端 API 层仅做参数校验和路由，业务逻辑在 `services/` 层。
 
+## 环境配置与安全
+
+### API Key 配置
+1. 复制 `backend/.env.example` 为 `backend/.env`
+2. 在 `.env` 中设置 `LLM_API_KEY=你的DeepSeek密钥`
+3. **`.env` 已被 `.gitignore` 保护，请勿提交到 Git**
+4. 若未配置 `LLM_API_KEY`，后端会返回占位数据 (portrait_generated=false)
+
+### 环境变量列表
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `LLM_API_KEY` | (空) | DeepSeek / OpenAI API 密钥 |
+| `LLM_BASE_URL` | `https://api.deepseek.com/v1` | LLM API 地址 |
+| `LLM_MODEL` | `deepseek-chat` | 模型名称 |
+| `DATABASE_URL` | `sqlite:///./metalradar.db` | 数据库连接 |
+| `DEBUG` | `true` | 调试模式 |
+| `CORS_ORIGINS` | `["http://localhost:5173"]` | 前端地址 |
+
 ## 股票数据接入说明
-- **数据源**：BaoStock `query_history_k_data_plus` 获取K线；东方财富 `stock_individual_info_em`、雪球 `stock_individual_basic_info_xq`、同花顺 `stock_zyjs_ths` 获取基本信息。
-- **复权**：K线统一使用前复权 (`adjustflag=2`)。
-- **代码格式**：前端传入纯数字代码；后端需转换为 BaoStock 格式 (`sh.xxx` / `sz.xxx`)；调用东财接口时用数字代码，雪球需加前缀。
-- **限频与缓存**：同花顺接口对 IP 频率敏感，只能在用户最终确认添加公司时调用一次，结果缓存 1 天。
+- **数据源**：新浪财经 `stock_zh_a_daily` → 东财 `stock_zh_a_hist` 兜底（K线）；东财全市场行情 `stock_zh_a_spot_em`（PE/PB/市值）+ `stock_individual_info_em` 兜底（公司信息）。
+- **复权**：K线统一使用前复权 (`qfq`)。
+- **代码格式**：前端传入纯数字6位代码；后端自动转换新浪格式 (`sh.xxx` / `sz.xxx`)。
+- **估值指标**：PE(市盈率)/PB(市净率) 从 akshare 全市场行情直接获取，优先使用后端数据，客户端计算兜底。
+- **限频与缓存**：全市场行情缓存5分钟(跨公司共享)，公司信息缓存1天。
 
 ## 财务报表数据接入
 - **数据源**：东方财富数据中心，通过 akshare 批量获取。
@@ -48,7 +67,7 @@
 - 上传接口 `POST /companies/{id}/upload-report` 接收 PDF，后端使用 `PyPDF2` 或 `pdfplumber` 提取文本。
 - 将文本送入大模型，按照 `5-ai-capabilities.md` 中定义的财报提取 Prompt 获取结构化 JSON。
 - 提取结果存入 `financial_reports` 表，并同时更新 `company_materials` 中的成本占比（若提取到更精确值）。
-- 若大模型提取失败（返回大量 null），返回明确错误信息，前端提示“解析失败，请确认文件是否为标准财报PDF”。
+- 若大模型提取失败（返回大量 null），返回明确错误信息，前端提示"解析失败，请确认文件是否为标准财报PDF"。
 
 ## 财务数据聚合接口
 - `GET /companies/{id}/financials` 应实现数据优先级：
@@ -88,6 +107,10 @@
 - **去重**：基于 `source:title` 的 MD5 哈希。
 - **处理管线**：拉取 → 解析 → 实体识别与情绪分析（LLM 批量分类）→ 关联度计算 → 入库 → 前端按 Tab 查询。
 
+### 收藏新闻
+- `GET /api/news?tab=favorites` 专用端点，直接查 `UserFavorite` 表返回全部收藏
+- 不使用 `tab='all'` + 客户端过滤方案（存在分页截断和 SHMET 源被排除的致命bug）
+
 ## LLM 新闻分类管线
 
 1. 新闻入库时 `event_type = ""`（标记为未分类）
@@ -126,7 +149,7 @@ if (error) return <ErrorCard onRetry={refetch} />;
 - 图表的数据完全来自 props，组件内部不预设任何数据。
 
 ## UI 组件要求
-- 必须使用 shadcn/ui 组件（Card, Tabs, Dialog, Drawer, Select, Badge, Skeleton, Tooltip 等）。
+- 必须使用 shadcn/ui 组件（Card, Tabs, Dialog, Drawer, Select, Badge, Skeleton, Tooltip, Slider 等）。
 - 样式使用 TailwindCSS（v4，`@tailwindcss/vite` 插件），禁止内联样式或 CSS Modules。
 - 图标使用 `lucide-react`。
 
@@ -140,14 +163,18 @@ if (error) return <ErrorCard onRetry={refetch} />;
 - 宏观跑马灯
 - 种子数据（3家公司 + 30+条新闻）
 
-### Sprint 2 🔧 进行中
-- 公司详情页 ✅ 已完成（公司切换器、K线图、期货迷你图、背离分析、财务指标三分类、季度趋势图、成本压力仪表）
-- 财务指标重组 ✅ 已完成（盈利能力/成长能力/财务健康三分类、扣非净利润/同比增速/资产负债率/经营现金流等10项指标）
-- K线图 ✅ 已完成（日/周/月切换、MA均线、成交量副图）
-- 财报上传 ✅ 已完成（PDF上传、LLM提取、数据优先级合并）
-- 敏感金属仪表盘 ✅ 已完成（MetalPriceDashboard：实时报价、成本压力、价格分位热力图、迷你K线、跨公司总览）
-- 期货深度数据：报价 ✅ | 分位图 ✅ | 波动率锥 📋 | 背离分析 ✅
+### Sprint 2 ✅ 已完成
+- 公司详情页（公司切换器、K线图、期货迷你图、背离分析、财务指标三分类、季度趋势图、成本压力仪表）
+- 财务指标重组（盈利能力/成长能力/财务健康三分类、扣非净利润/同比增速/资产负债率/经营现金流等10项指标）
+- K线图（日/周/月切换、MA均线、成交量副图）
+- 财报上传（PDF上传、LLM提取、数据优先级合并）
+- 敏感金属仪表盘（MetalPriceDashboard：实时报价、成本压力、价格分位热力图、迷你K线、跨公司总览）
+- 期货深度数据：报价 ✅ | 分位图 ✅ | 背离分析 ✅ | 波动率锥 📋
 - 反爬机制 ✅ 全局优化（随机延迟0.3~1.0s、按报告期缓存、按股票代码缓存）
+- **估值指标** ✅ PE/PB 从 akshare 全市场行情直接获取，CompanyHeader 显示
+- **收藏新闻修复** ✅ favorites Tab 专用端点，修复分页截断和 SHMET 源排除 bug
+- **产业链全景分析** ✅ LLM 分析 + Mermaid 流程图渲染 + CompanyPortrait 区域二重构
+- **安全加固** ✅ .env 加入 .gitignore，API 密钥从 Git 历史移除
 
 ### Sprint 3 📋 规划中
 - AI Agent 对话（三个场景：风险扫描/事件推演/自由问答）

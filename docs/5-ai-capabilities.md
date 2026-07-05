@@ -9,7 +9,7 @@
 - **Base URL**: `https://api.deepseek.com/v1`
 - **模型**: `deepseek-chat`（可通过 `.env` 的 `LLM_MODEL` 覆盖，默认 `gpt-4o-mini`）
 - **SDK**: `openai` Python 包
-- **关键参数**: temperature=0.2, max_tokens=3000, timeout=90s, response_format={"type": "json_object"}
+- **关键参数**: temperature=0.2~0.3, max_tokens=1500~3000, timeout=45~90s, response_format={"type": "json_object"}
 
 ---
 
@@ -173,6 +173,68 @@ user_edit（用户修正）→ 东方财富 API（akshare 四大接口）→ rep
 - `net_margin = net_profit / revenue × 100`，由后端自动计算
 - API 完全不可用时才回退到 LLM 提取数据
 - 反爬控制：连续 API 调用间隔随机 0.3~1.0s，按报告期缓存 6h，按股票代码缓存 1d
+
+---
+
+## 产业链全景分析 ✅（已实现）
+
+用户点击「开始 AI 分析」→ 后端调用大模型生成公司在产业链中的完整位置分析。
+
+### System Prompt 核心要点（`CHAIN_ANALYSIS_SYSTEM_PROMPT`）
+
+LLM 扮演资深产业链分析师，输出 JSON：
+
+```json
+{
+  "mermaid": "graph TB\n  A[上游矿产] --> B[中游冶炼]...",
+  "segments": [
+    {
+      "level": "upstream / midstream / downstream / auxiliary",
+      "label": "环节名称",
+      "details": [
+        {
+          "business": "具体业务名称",
+          "description": "业务在产业链中的价值定位",
+          "company_involved": true
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "covered_segments": ["上游", "中游"],
+    "core_segment": "最核心环节",
+    "full_label": "精准标签(<=15字)",
+    "analysis_text": "200字内综合解读"
+  }
+}
+```
+
+### 产业链层级定义
+- **upstream**: 原材料/资源端 — 矿产开采、基础化工、电子元器件等
+- **midstream**: 制造/加工/代工端 — 冶炼、零部件生产、组装、软件研发等
+- **downstream**: 终端产品/服务端 — 整车制造、消费电子、零售、SaaS等
+- **auxiliary**: 流通/配套环节 — 物流、渠道、售后、回收等
+
+### 关键参数
+| 参数 | 值 |
+|------|-----|
+| temperature | 0.3 |
+| max_tokens | 3000 |
+| response_format | json_object |
+| timeout | 45s |
+| max_retries | 2 (指数退避 2s→4s) |
+
+### 前端渲染
+- **Mermaid 流程图**：`MermaidDiagram` 组件动态加载 mermaid 库，theme=neutral，公司涉足环节绿色高亮
+- **环节说明**：按上游→中游→下游→辅助四层展示，绿点标注公司涉足的业务
+- **AI 总结**：覆盖环节 → 核心环节 → 精准标签 → 综合解读
+- **三种 UI 模式**：无分析引导 → 完整分析展示 → 编辑模式
+
+### 结果缓存
+- 分析结果存入 `company.chain_analysis` JSON 列
+- 后续请求直接返回缓存，无需重新调用 LLM
+- 用户可点击「重新AI分析」触发强制刷新
+- API Key 未配置时返回占位分析提示
 
 ---
 

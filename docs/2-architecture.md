@@ -14,6 +14,7 @@
 - TailwindCSS v4 + `@tailwindcss/vite`
 - **shadcn/ui**（必须，禁用 Element Plus / Ant Design）
 - ECharts（通过 `echarts-for-react` 封装）
+- Mermaid（产业链流程图渲染）
 - React Query v5 (`@tanstack/react-query`) 管理所有服务端数据
 - React Context 管理全局状态（用户、关注列表）
 - React Router v7（`react-router-dom`）
@@ -39,12 +40,12 @@ frontend/src/
 ├── pages/
 │   ├── HomePage.tsx        # 首页：新闻聚合+仪表盘
 │   ├── WatchlistPage.tsx   # 我的关注：公司管理+画像
-│   ├── CompanyPage.tsx     # 公司详情（Sprint 2 实现中）
+│   ├── CompanyPage.tsx     # 公司详情（财务指标/市值走势/成本压力）
 │   └── AgentPage.tsx       # AI Agent（Sprint 3 待实现）
 ├── components/
 │   ├── ui/                 # shadcn/ui 组件 (Button, Card, Tabs, Dialog, Drawer, Badge, Skeleton, Tooltip, Slider 等)
 │   ├── news/               # NewsCard, NewsSkeleton, MacroPanel, MacroTicker, ShmetBlock, MetalPriceDashboard, FavoritePopover, EmptyGuide, ErrorCard
-│   ├── watchlist/          # CompanyCard, CompanyPortrait, AddCompanyDrawer, FavoriteNews
+│   ├── watchlist/          # CompanyCard, CompanyPortrait, AddCompanyDrawer, FavoriteNews, MermaidDiagram
 │   └── company/            # CompanyHeader, StockKlineChart, FuturesMiniChart, DivergenceCard, FinancialMetrics, CostPressureDashboard, ReportUpload
 ├── hooks/                  # useNews, useCompany, useFutures, useStock, useFollows, useNewsRefresh (每个返回 React Query 对象)
 ├── services/               # api.ts (axios 实例), newsService.ts, companyService.ts, futuresService.ts, stockService.ts, userService.ts
@@ -58,18 +59,20 @@ frontend/src/
 backend/
 ├── main.py                 # FastAPI 应用入口，路由注册，CORS，启动事件
 ├── requirements.txt        # Python 依赖
-├── .env                    # 环境变量 (LLM_API_KEY, DATABASE_URL 等)
-├── .cache/                 # 文件缓存 (news_raw.json, futures_*.json)
+├── .env.example            # 环境变量模板 (复制为 .env 后填入实际值)
+├── .cache/                 # 文件缓存 (news_raw.json, futures_*.json, stock_*.json)
 ├── app/
 │   ├── api/                # API 路由层
 │   │   ├── news.py         # 新闻 CRUD, 抓取/分类/刷新
-│   │   ├── companies.py    # 公司搜索/初始化/画像管理
+│   │   ├── companies.py    # 公司搜索/初始化/画像管理/产业链分析/财报
+│   │   ├── stocks.py       # 股票K线/公司信息(市值/PE/PB/行业)
 │   │   ├── futures.py      # 期货行情/仪表盘/总览
 │   │   ├── user.py         # 用户关注/收藏管理
 │   │   └── seed.py         # 开发种子数据
 │   ├── models/             # SQLAlchemy 模型
 │   │   ├── news.py         # News
-│   │   ├── company.py      # Company, CompanyMaterial
+│   │   ├── company.py      # Company (含 chain_analysis JSON 列), CompanyMaterial
+│   │   ├── financial.py    # FinancialReport
 │   │   └── user.py         # UserFollow, UserFavorite, UserRead
 │   ├── schemas/            # Pydantic 请求/响应模型
 │   │   ├── news.py
@@ -79,14 +82,15 @@ backend/
 │   ├── services/           # 业务逻辑层
 │   │   ├── news_fetcher.py    # 多源新闻抓取 (3个源) + 去重入库
 │   │   ├── news_classifier.py # LLM 新闻批量分类 (事件/情绪/实体)
-│   │   ├── news_service.py    # 新闻查询/过滤/关联度计算
-│   │   ├── company_service.py # 公司搜索/画像生成/材料管理/财务数据聚合
-│   │   ├── stock_service.py   # 股票K线/财务数据(利润表+资产负债表+现金流量表+财务分析指标)/反爬控制
+│   │   ├── news_service.py    # 新闻查询/过滤/关联度计算/收藏
+│   │   ├── company_service.py # 公司搜索/画像生成/材料管理/财务数据聚合/产业链分析
+│   │   ├── stock_service.py   # 股票K线/公司信息(PE/PB/市值)/财务数据/反爬控制
 │   │   ├── futures_service.py # 期货K线/报价/分位/波动率锥
-│   │   └── llm_service.py     # LLM 调用封装 (DeepSeek)
+│   │   ├── llm_service.py     # LLM 调用封装 (画像生成/财报提取/产业链分析)
+│   │   └── _scrape_control.py # 反爬控制 (冷却/重试/锁)
 │   └── core/
-│       ├── config.py       # 配置管理 (Settings)
-│       └── database.py     # 数据库引擎 + 会话工厂
+│       ├── config.py       # 配置管理 (Settings, 从 .env 加载)
+│       └── database.py     # 数据库引擎 + 会话工厂 + SQLite 迁移
 ```
 
 ## 数据流原则
@@ -94,3 +98,4 @@ backend/
 - 全局状态（关注公司列表）存入 React Context。
 - 所有接口定义对齐 `api-spec.md`，字段名严格一致。
 - 后端 API 层仅做参数校验和路由，业务逻辑在 services 层。
+- `.env` 文件已被 gitignore 保护，API 密钥不得提交到仓库。
