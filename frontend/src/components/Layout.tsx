@@ -7,12 +7,14 @@ import {
   Building2,
   Bot,
   Radar,
+  GitGraph,
 } from 'lucide-react'
 
 const NAV_ITEMS = [
   { to: '/', label: '新闻资讯', icon: Newspaper },
   { to: '/watchlist', label: '我的关注', icon: Star },
   { to: '/company', label: '公司详情', icon: Building2 },
+  { to: '/knowledge-graph', label: '知识图谱', icon: GitGraph },
   { to: '/agent', label: 'AI Agent', icon: Bot },
 ]
 

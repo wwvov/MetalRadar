@@ -7,6 +7,7 @@ import HomePage from '@/pages/HomePage'
 import WatchlistPage from '@/pages/WatchlistPage'
 import CompanyPage from '@/pages/CompanyPage'
 import AgentPage from '@/pages/AgentPage'
+import KnowledgeGraphPage from '@/pages/KnowledgeGraphPage'
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
                 <Route path="/company" element={<CompanyPage />} />
                 <Route path="/company/:id" element={<CompanyPage />} />
                 <Route path="/agent" element={<AgentPage />} />
+                <Route path="/knowledge-graph" element={<KnowledgeGraphPage />} />
               </Route>
             </Routes>
           </BrowserRouter>
