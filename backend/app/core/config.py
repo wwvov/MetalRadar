@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     COMPANY_CACHE_TTL: int = 86400
 
     # 反爬控制
-    SCRAPE_COOLDOWN_SECONDS: int = 30
+    SCRAPE_COOLDOWN_SECONDS: int = 3
 
     # AI / LLM
     LLM_API_KEY: str = ""

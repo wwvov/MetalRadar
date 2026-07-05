@@ -40,7 +40,6 @@ export interface PressureData {
   current_price: number
   change_pct: number
   pressure_level: 'low' | 'medium' | 'high'
-  estimated_margin_impact: number | null
 }
 
 export interface DashboardMaterial {
@@ -49,7 +48,8 @@ export interface DashboardMaterial {
   direction: 'negative' | 'positive'
   contract: string
   quote: FuturesQuote | null
-  percentile: PricePercentile | null
+  percentile_1y: PricePercentile | null
+  percentile_2y: PricePercentile | null
   history_3m: { date: string; close: number }[]
   pressure: PressureData | null
 }
@@ -67,4 +67,42 @@ export interface DashboardData {
 export interface DashboardResponse {
   ok: boolean
   data: DashboardData
+}
+
+// ---- 跨公司概览 ----
+
+export interface OverviewMetal {
+  material_name: string
+  contract: string
+  quote: FuturesQuote | null
+  percentile_1y: PricePercentile | null
+  percentile_2y: PricePercentile | null
+  history_3m: { date: string; close: number }[]
+  companies: {
+    company_id: string
+    company_name: string
+    cost_pct: number | null
+    direction: string
+  }[]
+  total_companies: number
+}
+
+export interface OverviewData {
+  metals: OverviewMetal[]
+  total_metals: number
+  total_companies: number
+}
+
+export interface OverviewResponse {
+  ok: boolean
+  data: OverviewData
+}
+
+// ---- 有材料数据的公司列表 ----
+
+export interface CompanyWithMaterials {
+  id: string
+  name: string
+  code: string
+  industry: string
 }

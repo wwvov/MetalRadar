@@ -1,17 +1,34 @@
 """MetalRadar API — FastAPI 主入口"""
 
+import logging
+import threading
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.core.database import init_db
+from app.core.database import init_db, SessionLocal
 from app.api import news, companies, user, seed, futures
+
+logger = logging.getLogger(__name__)
+
+
+def _warmup_futures_cache():
+    """后台线程：预热期货数据缓存"""
+    try:
+        db = SessionLocal()
+        from app.services.futures_service import prefetch_all_symbols
+        prefetch_all_symbols(db)
+        db.close()
+    except Exception as e:
+        logger.warning(f"期货缓存预热失败（不影响正常启动）: {e}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期：启动时初始化数据库"""
+    """应用生命周期：启动时初始化数据库，后台预热期货缓存"""
     init_db()
+    # 后台预热期货缓存，不阻塞启动
+    threading.Thread(target=_warmup_futures_cache, daemon=True).start()
     yield
 
 

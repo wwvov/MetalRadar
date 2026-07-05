@@ -21,6 +21,28 @@ def search(keyword: str = Query(..., min_length=1, description="搜索关键词"
     return company_service.search_companies(db, keyword)
 
 
+@router.get("/with-materials")
+def get_companies_with_materials(db: Session = Depends(get_db)):
+    """获取所有有敏感材料数据的公司列表 — 用于仪表盘公司选择器"""
+    from app.models.company import Company, CompanyMaterial
+    from sqlalchemy import distinct
+    company_ids = db.query(distinct(CompanyMaterial.company_id)).all()
+    ids = [row[0] for row in company_ids]
+    companies = db.query(Company).filter(Company.id.in_(ids)).all()
+    return {
+        "ok": True,
+        "data": [
+            {
+                "id": c.id,
+                "name": c.name,
+                "code": c.id,
+                "industry": c.industry or "",
+            }
+            for c in companies
+        ],
+    }
+
+
 @router.get("/{company_id}", response_model=CompanyDetailOut)
 def get_detail(company_id: str, db: Session = Depends(get_db)):
     """获取公司详情（含画像）— 若画像无效则自动触发重新生成"""

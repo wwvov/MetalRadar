@@ -34,4 +34,6 @@ class CompanyMaterial(Base):
     direction = Column(String(10), comment="影响方向: negative / positive")
     contract = Column(String(20), comment="对应期货合约代码")
 
+    base_price = Column(Numeric(15, 2), comment="基准价格(60日均价)")
+
     company = relationship("Company", back_populates="materials")
