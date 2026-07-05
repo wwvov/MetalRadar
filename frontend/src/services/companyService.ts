@@ -1,5 +1,5 @@
 import api from './api'
-import type { CompanySearchResult, CompanyDetail, PortraitUpdatePayload } from '@/types/company'
+import type { CompanySearchResult, CompanyDetail, PortraitUpdatePayload, FinancialData, CostPressure, DivergenceAnalysis, ApiResponse } from '@/types/company'
 
 export const companyService = {
   searchCompanies: async (keyword: string): Promise<CompanySearchResult> => {
@@ -52,5 +52,25 @@ export const companyService = {
       headers: reportPdf ? { 'Content-Type': 'multipart/form-data' } : {},
     })
     return data
+  },
+
+  /** 获取聚合财务数据 */
+  getFinancials: async (companyId: string): Promise<FinancialData> => {
+    const { data } = await api.get<ApiResponse<FinancialData>>(`/companies/${companyId}/financials`)
+    return data.data
+  },
+
+  /** 获取材料成本压力 */
+  getCostPressure: async (companyId: string): Promise<CostPressure> => {
+    const { data } = await api.get<ApiResponse<CostPressure>>(`/companies/${companyId}/cost-pressure`)
+    return data.data
+  },
+
+  /** 获取股票vs期货背离分析 */
+  getDivergence: async (companyId: string, material?: string): Promise<DivergenceAnalysis> => {
+    const { data } = await api.get<ApiResponse<DivergenceAnalysis>>(`/companies/${companyId}/divergence`, {
+      params: material ? { material } : {},
+    })
+    return data.data
   },
 }

@@ -183,3 +183,65 @@ async def upload_financial_report(
         return company_service.save_financial_report(db, company_id, financial_data)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/{company_id}/financials")
+def get_financials(company_id: str, db: Session = Depends(get_db)):
+    """获取公司财务数据（聚合接口）
+
+    数据优先级：
+    1. financial_reports 表中 extraction_source='user_edit' 的记录
+    2. financial_reports 表中 extraction_source='report_ai' 的记录（最新一条）
+    3. 东方财富三大报表接口（akshare，缓存1天）
+    4. 都无数据时返回空
+    """
+    try:
+        result = company_service.get_aggregated_financials(db, company_id)
+        return {"ok": True, "data": result}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"获取财务数据失败 {company_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"获取财务数据失败: {str(e)}")
+
+
+@router.get("/{company_id}/cost-pressure")
+def get_cost_pressure(company_id: str, db: Session = Depends(get_db)):
+    """获取公司材料成本压力数据
+
+    复用 futures_service.get_dashboard_data 计算各品种成本压力。
+    包含：基准价、当前价、涨跌幅、压力等级。
+    """
+    from app.services.stock_service import get_cost_pressure_data
+    try:
+        data = get_cost_pressure_data(db, company_id)
+        return {"ok": True, "data": data}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"获取成本压力失败 {company_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"获取成本压力失败: {str(e)}")
+
+
+@router.get("/{company_id}/divergence")
+def get_divergence(
+    company_id: str,
+    material: str = Query("", description="品种名，为空则使用成本占比最高的品种"),
+    db: Session = Depends(get_db),
+):
+    """股票价格 vs 期货价格背离分析
+
+    计算股票价格与敏感原材料期货价格的60日滚动相关系数，
+    识别背离区间，生成AI解读文本。
+
+    返回: {correlation_series, events, analysis_text, stock_code, material}
+    """
+    from app.services.stock_service import get_divergence_analysis
+    try:
+        data = get_divergence_analysis(db, company_id, material)
+        return {"ok": True, "data": data}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"背离分析失败 {company_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"背离分析失败: {str(e)}")

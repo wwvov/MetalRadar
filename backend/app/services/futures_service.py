@@ -316,6 +316,55 @@ def get_percentile(material_name: str, contract: str = "", days: int = 252) -> d
         return None
 
 
+def _period_to_date_range(period: str) -> tuple[str, str]:
+    """将报告期转为日期范围
+
+    Args:
+        period: 报告期如 "2025Q4" 或 "2025Q1"
+
+    Returns:
+        (start_date, end_date) 如 ("2025-10-01", "2025-12-31")
+    """
+    import calendar
+    try:
+        year = int(period[:4])
+        quarter = int(period[-1])
+        start_month = (quarter - 1) * 3 + 1
+        end_month = quarter * 3
+        last_day = calendar.monthrange(year, end_month)[1]
+        return (
+            f"{year}-{start_month:02d}-01",
+            f"{year}-{end_month:02d}-{last_day:02d}",
+        )
+    except (ValueError, IndexError):
+        return ("", "")
+
+
+def _calc_period_average_price(
+    dates: list[str],
+    closes: list[float],
+    report_period: str,
+) -> float | None:
+    """计算财报报告期内的期货均价（真正的"财报基准价"）
+
+    在报告期日期范围内的交易日收盘价取平均。
+    至少需要10个交易日数据才有效。
+    """
+    start_date, end_date = _period_to_date_range(report_period)
+    if not start_date or not end_date:
+        return None
+
+    period_closes = []
+    for d, c in zip(dates, closes):
+        if start_date <= d <= end_date:
+            period_closes.append(c)
+
+    if len(period_closes) >= 10:
+        return round(sum(period_closes) / len(period_closes), 2)
+
+    return None
+
+
 def calc_pressure(
     current_price: float,
     cost_pct: float | None,
@@ -343,8 +392,20 @@ def calc_pressure(
     }
 
 
-def _derive_material_data(df: pd.DataFrame, material_name: str, cost_pct: float | None, base_price: float | None) -> dict:
-    """从一份 K 线 DataFrame 派生单个材料的所有仪表盘数据"""
+def _derive_material_data(
+    df: pd.DataFrame,
+    material_name: str,
+    cost_pct: float | None,
+    base_price: float | None,
+    report_period: str = "",
+) -> dict:
+    """从一份 K 线 DataFrame 派生单个材料的所有仪表盘数据
+
+    base_price 计算优先级:
+    1. DB 中显式设置的 base_price（LLM提取或用户修正）
+    2. 有财报报告期 → 计算该报告期内的期货均价（财报基准价）
+    3. 无财报 → 60日均价作为近似估计
+    """
     if df.empty:
         return {
             "quote": None,
@@ -356,12 +417,26 @@ def _derive_material_data(df: pd.DataFrame, material_name: str, cost_pct: float 
         }
 
     closes = [float(row.iloc[4]) for _, row in df.iterrows()]
+    dates = [str(row.iloc[0]) for _, row in df.iterrows()]
 
-    # --- auto-calculate base_price from 60-day SMA if not set ---
+    # --- 基准价计算 ---
     calculated_base_price = base_price
-    if calculated_base_price is None and len(closes) >= 60:
-        # 使用最近 60 个交易日的均价作为基准价
-        calculated_base_price = round(sum(closes[-60:]) / 60, 2)
+    base_price_source = "db"  # 默认来源
+
+    if calculated_base_price is None:
+        # 优先: 财报报告期内均价（真正的"财报基准价"）
+        if report_period:
+            period_avg = _calc_period_average_price(dates, closes, report_period)
+            if period_avg is not None:
+                calculated_base_price = period_avg
+                base_price_source = f"period_{report_period}"
+                logger.info(f"{material_name} 基准价={calculated_base_price} (财报期{report_period}均价)")
+
+        # 兜底: 60日均价
+        if calculated_base_price is None and len(closes) >= 60:
+            calculated_base_price = round(sum(closes[-60:]) / 60, 2)
+            base_price_source = "60d_sma"
+            logger.info(f"{material_name} 基准价={calculated_base_price} (60日均价，无财报数据)")
 
     # --- quote: 最新报价 ---
     latest = df.iloc[-1]
@@ -457,6 +532,16 @@ def get_dashboard_data(db, company_id: str) -> dict:
     # 按成本占比降序
     materials.sort(key=lambda m: m.cost_pct or 0, reverse=True)
 
+    # 获取最新财报报告期（用于计算财报基准价）
+    from app.models.financial import FinancialReport
+    latest_report = (
+        db.query(FinancialReport)
+        .filter(FinancialReport.company_id == company_id)
+        .order_by(FinancialReport.id.desc())
+        .first()
+    )
+    report_period = latest_report.report_period if latest_report else ""
+
     # --- 第一步：收集唯一 symbol，预取所有 K 线 ---
     symbol_to_df: dict[str, pd.DataFrame] = {}
     symbol_to_contract: dict[str, str] = {}
@@ -482,7 +567,12 @@ def get_dashboard_data(db, company_id: str) -> dict:
         if symbol and symbol in symbol_to_df and not symbol_to_df[symbol].empty:
             df = symbol_to_df[symbol]
             db_base_price = float(m.base_price) if getattr(m, "base_price", None) else None
-            derived = _derive_material_data(df, m.material_name, float(m.cost_pct) if m.cost_pct else None, db_base_price)
+            derived = _derive_material_data(
+                df, m.material_name,
+                float(m.cost_pct) if m.cost_pct else None,
+                db_base_price,
+                report_period=report_period,
+            )
             # 补充 contract 信息
             if derived["quote"]:
                 derived["quote"]["contract"] = symbol
@@ -595,7 +685,7 @@ def get_overview_data(db) -> dict:
         if symbol and symbol in symbol_to_df and not symbol_to_df[symbol].empty:
             df = symbol_to_df[symbol]
             base_price = info.get("base_price")
-            derived = _derive_material_data(df, name, info["cost_pct"], base_price)
+            derived = _derive_material_data(df, name, info["cost_pct"], base_price, report_period="")
             if derived["quote"]:
                 derived["quote"]["contract"] = symbol
             quote = derived["quote"]

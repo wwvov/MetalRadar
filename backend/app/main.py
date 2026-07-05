@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import init_db, SessionLocal
-from app.api import news, companies, user, seed, futures
+from app.api import news, companies, user, seed, futures, stocks
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +53,7 @@ app.include_router(companies.router, prefix="/api")
 app.include_router(user.router, prefix="/api")
 app.include_router(seed.router, prefix="/api")
 app.include_router(futures.router, prefix="/api")
+app.include_router(stocks.router, prefix="/api")
 
 
 @app.get("/api/health")

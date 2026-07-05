@@ -45,3 +45,113 @@ def prefetch_cache(db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"缓存预热失败: {e}")
         raise HTTPException(status_code=500, detail=f"缓存预热失败: {e}")
+
+
+@router.get("/{contract}/kline")
+def get_futures_kline(
+    contract: str,
+    period: str = "daily",
+    start_date: str = "",
+    end_date: str = "",
+    db: Session = Depends(get_db),
+):
+    """获取期货合约历史K线数据
+
+    数据源: akshare futures_main_sina，缓存5分钟。
+    contract 使用连续合约代码（如 LC0、CU0、RB0）。
+    """
+    from app.services.futures_service import _fetch_kline, _parse_kline_df, _get_cache_path, _read_cache
+
+    # 标准化合约代码为大写
+    contract = contract.strip().upper()
+    if not contract:
+        raise HTTPException(status_code=400, detail="合约代码不能为空")
+
+    try:
+        df = _fetch_kline(contract)
+        records = _parse_kline_df(df)
+
+        # 按日期范围过滤
+        if start_date:
+            records = [r for r in records if r["date"] >= start_date]
+        if end_date:
+            records = [r for r in records if r["date"] <= end_date]
+
+        if period == "weekly":
+            records = _resample_weekly(records)
+        elif period == "monthly":
+            records = _resample_monthly(records)
+
+        return {"ok": True, "data": records}
+    except Exception as e:
+        logger.error(f"获取期货K线失败 {contract}: {e}")
+        raise HTTPException(status_code=502, detail=f"获取期货K线失败: {str(e)}")
+
+
+def _resample_weekly(records: list[dict]) -> list[dict]:
+    """将日线聚合为周线"""
+    if not records:
+        return []
+    from collections import OrderedDict
+    weeks = OrderedDict()
+    for r in records:
+        # 简单按年份+周数分组
+        parts = r["date"].split("-")
+        if len(parts) == 3:
+            from datetime import date
+            d = date(int(parts[0]), int(parts[1]), int(parts[2]))
+            week_key = f"{d.isocalendar()[0]}-W{d.isocalendar()[1]:02d}"
+            if week_key not in weeks:
+                weeks[week_key] = []
+            weeks[week_key].append(r)
+
+    result = []
+    for week_key, bars in weeks.items():
+        opens = [b["open"] for b in bars]
+        highs = [b["high"] for b in bars]
+        lows = [b["low"] for b in bars]
+        closes = [b["close"] for b in bars]
+        volumes = sum(b["volume"] for b in bars)
+        holds = bars[-1].get("hold", 0)
+        result.append({
+            "date": bars[0]["date"],
+            "open": opens[0],
+            "high": max(highs),
+            "low": min(lows),
+            "close": closes[-1],
+            "volume": volumes,
+            "hold": holds,
+        })
+    return result
+
+
+def _resample_monthly(records: list[dict]) -> list[dict]:
+    """将日线聚合为月线"""
+    if not records:
+        return []
+    from collections import OrderedDict
+    months = OrderedDict()
+    for r in records:
+        month_key = r["date"][:7]  # YYYY-MM
+        if month_key not in months:
+            months[month_key] = []
+        months[month_key].append(r)
+
+    result = []
+    for month_key, bars in months.items():
+        opens = [b["open"] for b in bars]
+        highs = [b["high"] for b in bars]
+        lows = [b["low"] for b in bars]
+        closes = [b["close"] for b in bars]
+        volumes = sum(b["volume"] for b in bars)
+        holds = bars[-1].get("hold", 0)
+        result.append({
+            "date": bars[0]["date"],
+            "open": opens[0],
+            "high": max(highs),
+            "low": min(lows),
+            "close": closes[-1],
+            "volume": volumes,
+            "hold": holds,
+        })
+    return result
