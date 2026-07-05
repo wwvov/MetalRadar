@@ -9,7 +9,7 @@ export function useStockKline(
   return useQuery({
     queryKey: ['stock-kline', code, frequency],
     queryFn: () => stockService.getKline(code!, frequency),
-    enabled: !!code && code.length === 6,
+    enabled: !!code,
     staleTime: 60 * 60 * 1000, // 1小时缓存（日线每天只更新一次）
   })
 }
@@ -18,7 +18,7 @@ export function useStockInfo(code: string | undefined) {
   return useQuery({
     queryKey: ['stock-info', code],
     queryFn: () => stockService.getStockInfo(code!),
-    enabled: !!code && code.length === 6,
+    enabled: !!code,
     staleTime: 24 * 60 * 60 * 1000, // 1天缓存
   })
 }

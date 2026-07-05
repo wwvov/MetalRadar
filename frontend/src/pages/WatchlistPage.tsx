@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Card } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
-import { ScrollArea } from '@/components/ui/scroll-area'
+
 import { useWatchlist } from '@/providers'
 import { useFollows } from '@/hooks/useFollows'
 import { useCompanyDetail, useCompanyDetails } from '@/hooks/useCompany'
@@ -114,8 +114,8 @@ export default function WatchlistPage() {
           </div>
         </Card>
       ) : (
-        <ScrollArea className="w-full">
-          <div className="flex gap-3 pb-3 mb-6">
+        <div className="overflow-x-auto pb-3 mb-6">
+          <div className="flex gap-3 min-w-max">
             {follows.map((company) => (
               <CompanyCard
                 key={company.id}
@@ -127,7 +127,7 @@ export default function WatchlistPage() {
               />
             ))}
           </div>
-        </ScrollArea>
+        </div>
       )}
 
       {/* 选中公司的完整画像 */}

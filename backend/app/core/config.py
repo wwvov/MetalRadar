@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     NEWS_CACHE_TTL: int = 300
     COMPANY_CACHE_TTL: int = 86400
 
+    # 新闻自动刷新 (分钟)，0 表示禁用
+    NEWS_AUTO_REFRESH_MINUTES: int = 30
+
     # 反爬控制
     SCRAPE_COOLDOWN_SECONDS: int = 3
 

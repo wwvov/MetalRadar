@@ -343,8 +343,10 @@ def _fetch_daily_kline(code: str, adjust: str, cache_key: str) -> list[dict]:
 def get_stock_info(code: str) -> dict:
     """获取A股公司基本信息（市值/行业/股本等）
 
-    带指数退避重试，失败时返回空数据而非抛异常，
-    确保前端能正常渲染页面（仅市值字段为空）。
+    双数据源（反爬友好）：
+    1. stock_zh_a_spot_em — 全市场实时行情(总市值)，一次调用覆盖所有A股，
+       5分钟共享缓存，大幅减少API调用次数
+    2. stock_individual_info_em — 详细信息(行业/总股本)，仅兜底
 
     Args:
         code: 6位数字股票代码
@@ -364,45 +366,85 @@ def get_stock_info(code: str) -> dict:
 
         import akshare as ak
 
-        def _fetch_info():
-            return ak.stock_individual_info_em(symbol=code)
+        info = {"code": code, "total_market_cap": None, "circulating_market_cap": None,
+                "industry": "", "total_shares": None, "circulating_shares": None}
 
+        # --- 数据源1（优先）: stock_zh_a_spot_em 全市场实时行情 ---
+        # 一次API调用覆盖所有A股，5分钟共享缓存，比 per-stock 调用反爬风险低得多
         try:
-            df = _retry_with_backoff(_fetch_info, max_retries=2, label=f"公司信息 {code}")
-
-            info = {"code": code}
-            for _, row in df.iterrows():
-                key = str(row["item"])
-                val = row["value"]
-                if key == "总市值":
-                    info["total_market_cap"] = float(val) if val and val != "-" else None
-                elif key == "流通市值":
-                    info["circulating_market_cap"] = float(val) if val and val != "-" else None
-                elif key == "行业":
-                    info["industry"] = str(val) if val else ""
-                elif key == "总股本":
-                    info["total_shares"] = float(val) if val and val != "-" else None
-                elif key == "流通股":
-                    info["circulating_shares"] = float(val) if val and val != "-" else None
-
-            logger.info(f"公司信息 {code} 获取成功")
-            _write_cache(cache_key, {"data": info})
-            return info
-
-        except ImportError:
-            logger.error("akshare 未安装")
-            raise
+            spot = _get_spot_market_cache()
+            for _, row in spot.iterrows():
+                if str(row.get("代码", "")) == code:
+                    mc = row.get("总市值")
+                    info["total_market_cap"] = float(mc) if mc and mc != "-" else None
+                    cmc = row.get("流通市值")
+                    info["circulating_market_cap"] = float(cmc) if cmc and cmc != "-" else None
+                    logger.info(f"公司信息 {code} 从全市场行情获取市值: {info['total_market_cap']}")
+                    break
         except Exception as e:
-            logger.error(f"获取公司信息失败 {code}（已重试）: {e}")
-            # 尝试过期缓存
+            logger.warning(f"公司信息 {code} spot_em 失败: {e}")
+
+        # --- 数据源2（兜底）: stock_individual_info_em 详细信息 ---
+        # 仅在市值获取失败时尝试，减少不必要的API调用
+        if info["total_market_cap"] is None:
+            try:
+                def _fetch_info():
+                    return ak.stock_individual_info_em(symbol=code)
+
+                df = _retry_with_backoff(_fetch_info, max_retries=1, label=f"公司信息 {code}")
+
+                for _, row in df.iterrows():
+                    key = str(row["item"])
+                    val = row["value"]
+                    if key == "总市值":
+                        info["total_market_cap"] = float(val) if val and val != "-" else None
+                    elif key == "流通市值":
+                        info["circulating_market_cap"] = float(val) if val and val != "-" else None
+                    elif key == "行业":
+                        info["industry"] = str(val) if val else ""
+                    elif key == "总股本":
+                        info["total_shares"] = float(val) if val and val != "-" else None
+                    elif key == "流通股":
+                        info["circulating_shares"] = float(val) if val and val != "-" else None
+
+                logger.info(f"公司信息 {code} 获取成功(individual_info)")
+            except Exception as e:
+                logger.warning(f"公司信息 {code} individual_info 失败: {e}")
+
+        # 写入缓存（即使市值为空也缓存，避免反复重试触发反爬）
+        _write_cache(cache_key, {"data": info})
+
+        # 如果还是空，尝试过期缓存
+        if info["total_market_cap"] is None:
             expired = _read_cache_expired(cache_key)
-            if expired and "data" in expired:
+            if expired and "data" in expired and expired["data"].get("total_market_cap"):
                 logger.warning(f"使用过期缓存 {code}")
                 return expired["data"]
-            # 返回空数据，不抛异常 — 让前端正常渲染
-            logger.warning(f"公司信息 {code} 返回空数据（API不可用）")
-            return {"code": code, "total_market_cap": None, "circulating_market_cap": None,
-                    "industry": "", "total_shares": None, "circulating_shares": None}
+
+        return info
+
+
+# 全市场实时行情缓存（跨股票共享，5分钟TTL）
+_SPOT_CACHE_TTL = 300  # 5分钟
+_spot_cache: dict | None = None
+
+
+def _get_spot_market_cache():
+    """获取全市场A股实时行情（缓存5分钟，跨股票共享）"""
+    global _spot_cache
+    now = time.time()
+    if _spot_cache and (now - _spot_cache.get("_ts", 0) < _SPOT_CACHE_TTL):
+        return _spot_cache["df"]
+
+    import akshare as ak
+
+    def _fetch_spot():
+        return ak.stock_zh_a_spot_em()
+
+    df = _retry_with_backoff(_fetch_spot, max_retries=2, label="全市场实时行情")
+    _spot_cache = {"df": df, "_ts": now}
+    logger.info(f"全市场实时行情获取成功: {len(df)} 只股票")
+    return df
 
 
 def get_financial_data(code: str) -> dict:
@@ -434,11 +476,11 @@ def get_financial_data(code: str) -> dict:
             import time as time_mod
 
             today = datetime.now()
-            # 计算最近6个报告期，过滤掉财报可能尚未披露的（<45天），取最多4个
+            # 计算最近8个报告期，过滤掉财报可能尚未披露的（<45天），取最多8个
             from datetime import timedelta
-            periods = _calc_report_periods(today, 6)
+            periods = _calc_report_periods(today, 8)
             cutoff = today - timedelta(days=45)
-            periods = [p for p in periods if _period_to_date(p) < cutoff][:4]
+            periods = [p for p in periods if _period_to_date(p) < cutoff][:8]
             logger.info(f"获取 {code} 财务数据，报告期: {periods}")
 
             # 统计实际API调用次数，控制频次避免触发反爬

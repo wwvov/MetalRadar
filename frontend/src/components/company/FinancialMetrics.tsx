@@ -47,13 +47,15 @@ function getMetricValue(q: FinancialQuarter, metric: MetricKey): number | null {
   }
 }
 
-/** 根据容器宽度决定最多展示几个季度（上市越久 → 宽度越宽 → 展示越多） */
-function getMaxQuarters(width: number): number {
-  if (width === 0) return 40 // 尚未测量，默认全量（10年）
-  if (width < 500) return 8   // 2年
-  if (width < 700) return 16  // 4年
-  if (width < 900) return 24  // 6年
-  return 40                   // 10年
+/** 根据容器宽度决定最多展示几个季度（上市越久 → 宽度越宽 → 展示越多）
+ *  全部模式固定4个季度（避免柱状图过于拥挤）；单指标模式按宽度自适应 */
+function getMaxQuarters(width: number, metric: MetricKey): number {
+  if (metric === 'all') return 4  // 全部指标退化为最近4个季度
+  if (width === 0) return 40      // 尚未测量，默认全量（10年）
+  if (width < 500) return 8       // 2年
+  if (width < 700) return 16      // 4年
+  if (width < 900) return 24      // 6年
+  return 40                       // 10年
 }
 
 /** 计算最新季度相对于去年同期的同比增长率 */
@@ -285,9 +287,9 @@ function QuarterlyTrendChart({ quarters }: { quarters: FinancialQuarter[] }) {
   // 按时间顺序排列（旧→新），根据宽度裁剪
   const chartData = useMemo(() => {
     const chronological = [...quarters].reverse() // DB 返回新→旧，翻转为旧→新
-    const maxQ = getMaxQuarters(containerWidth)
+    const maxQ = getMaxQuarters(containerWidth, metric)
     return chronological.slice(-maxQ) // 取最近 N 个季度
-  }, [quarters, containerWidth])
+  }, [quarters, containerWidth, metric])
 
   const periods = chartData.map((d) => d.period)
 

@@ -5,6 +5,7 @@ import { useFollows } from '@/hooks/useFollows'
 import { useCompanyDetail } from '@/hooks/useCompany'
 import {
   useStockKline,
+  useStockInfo,
   useCompanyFinancials,
   useCostPressure,
   useDivergence,
@@ -55,6 +56,7 @@ export default function CompanyPage() {
   // --- 数据查询（仅当有选中公司时启用）---
   const companyQuery = useCompanyDetail(selectedId || undefined)
   const stockKlineQuery = useStockKline(selectedId || undefined, klineFrequency)
+  const stockInfoQuery = useStockInfo(companyQuery.data?.code)
   const financialsQuery = useCompanyFinancials(selectedId || undefined)
   const costPressureQuery = useCostPressure(selectedId || undefined)
   const divergenceQuery = useDivergence(selectedId || undefined)
@@ -133,6 +135,8 @@ export default function CompanyPage() {
         company={company}
         follows={follows}
         onSwitchCompany={handleSwitchCompany}
+        stockInfo={stockInfoQuery.data}
+        financialData={financialsQuery.data}
       />
 
       {/* ===== 分区一：市值走势 ===== */}
@@ -142,9 +146,9 @@ export default function CompanyPage() {
           市值走势
         </h2>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
           {/* 左侧：股票K线图 */}
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-2 flex">
             <StockKlineChart
               data={stockKlineQuery.data || []}
               companyName={company.short_name || company.name}
@@ -157,7 +161,7 @@ export default function CompanyPage() {
           </div>
 
           {/* 右侧：期货走势缩略图 */}
-          <div className="lg:col-span-1">
+          <div className="lg:col-span-1 flex">
             <FuturesMiniChart
               materials={futuresQuery.data?.data?.materials || []}
               isLoading={futuresQuery.isLoading}

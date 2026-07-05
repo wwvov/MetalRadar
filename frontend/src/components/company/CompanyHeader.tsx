@@ -13,7 +13,7 @@ import {
   Newspaper,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { CompanyDetail, CompanyBasic } from '@/types/company'
+import type { CompanyDetail, CompanyBasic, StockInfo, FinancialData } from '@/types/company'
 
 const POSITION_LABELS: Record<string, string> = {
   up: '上游',
@@ -32,12 +32,34 @@ interface CompanyHeaderProps {
   follows: CompanyBasic[]
   onSwitchCompany: (companyId: string) => void
   loading?: boolean
+  stockInfo?: StockInfo
+  financialData?: FinancialData
 }
 
-export function CompanyHeader({ company, follows, onSwitchCompany, loading }: CompanyHeaderProps) {
+export function CompanyHeader({ company, follows, onSwitchCompany, loading, stockInfo, financialData }: CompanyHeaderProps) {
   const navigate = useNavigate()
   const [showSwitcher, setShowSwitcher] = useState(false)
   const [switcherSearch, setSwitcherSearch] = useState('')
+
+  // 计算估值指标
+  const marketCap = stockInfo?.total_market_cap
+  const latestQuarter = financialData?.quarters?.[0]
+  // 净资产: 优先取 equity 字段, 其次用 总资产-总负债 推算
+  const equity = latestQuarter?.equity
+    ?? ((latestQuarter?.total_assets != null && latestQuarter?.total_liabilities != null)
+      ? latestQuarter.total_assets - latestQuarter.total_liabilities
+      : null)
+  const revenue = financialData?.revenue  // 最新季度营业收入
+
+  // 市净率 PB = 总市值 / 净资产
+  const pb = (marketCap != null && equity != null && equity > 0)
+    ? (marketCap / equity).toFixed(2)
+    : null
+
+  // 市销率 PS = 总市值 / 年化营业收入 (单季×4)
+  const ps = (marketCap != null && revenue != null && revenue > 0)
+    ? (marketCap / (revenue * 4)).toFixed(2)
+    : null
 
   const filteredFollows = switcherSearch
     ? follows.filter(
@@ -77,7 +99,7 @@ export function CompanyHeader({ company, follows, onSwitchCompany, loading }: Co
       {/* 第一行：公司名称 + 切换器 */}
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">
-          <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2 flex-wrap">
+          <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2 flex-wrap">
             {company.name}
             <span className="text-sm font-mono text-slate-400 font-normal">
               {company.code || company.id}
@@ -86,6 +108,20 @@ export function CompanyHeader({ company, follows, onSwitchCompany, loading }: Co
               <Badge variant="secondary" className="text-[11px] bg-slate-100 text-slate-600 border-0">
                 {company.industry}
               </Badge>
+            )}
+            {/* 估值指标：市净率 PB */}
+            {pb != null && (
+              <span className="text-xs text-slate-500 font-normal" title="市净率 = 总市值 / 净资产">
+                <span className="text-slate-400">PB</span>{' '}
+                <span className="font-semibold text-slate-700">{pb}</span>
+              </span>
+            )}
+            {/* 估值指标：市销率 PS */}
+            {ps != null && (
+              <span className="text-xs text-slate-500 font-normal" title="市销率 = 总市值 / 年化营业收入">
+                <span className="text-slate-400">PS</span>{' '}
+                <span className="font-semibold text-slate-700">{ps}</span>
+              </span>
             )}
           </h1>
           {company.business_desc && (

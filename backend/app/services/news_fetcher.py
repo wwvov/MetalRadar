@@ -10,7 +10,9 @@ from datetime import datetime, timezone, timedelta
 import pandas as pd
 
 from app.core.config import settings
+from app.core.database import SessionLocal
 from app.models.news import News
+from app.services._scrape_control import retry_with_backoff, acquire_lock
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -83,7 +85,9 @@ def _fetch_shmet_news() -> list[dict]:
     try:
         import akshare as ak
         logger.info("正在从 akshare 获取上海金属网新闻...")
-        df = ak.futures_news_shmet()
+        def _call():
+            return ak.futures_news_shmet()
+        df = retry_with_backoff(_call, max_retries=2, label="上海金属网新闻")
         if df is None or df.empty:
             logger.warning("上海金属网新闻返回空数据")
             return []
@@ -134,7 +138,9 @@ def _fetch_eastmoney_global() -> list[dict]:
     try:
         import akshare as ak
         logger.info("正在从 akshare 获取东方财富全球快讯...")
-        df = ak.stock_info_global_em()
+        def _call():
+            return ak.stock_info_global_em()
+        df = retry_with_backoff(_call, max_retries=2, label="东方财富全球快讯")
         if df is None or df.empty:
             logger.warning("东方财富全球快讯返回空数据")
             return []
@@ -176,7 +182,9 @@ def _fetch_sina_global() -> list[dict]:
     try:
         import akshare as ak
         logger.info("正在从 akshare 获取新浪全球快讯...")
-        df = ak.stock_info_global_sina()
+        def _call():
+            return ak.stock_info_global_sina()
+        df = retry_with_backoff(_call, max_retries=2, label="新浪全球快讯")
         if df is None or df.empty:
             logger.warning("新浪全球快讯返回空数据")
             return []
@@ -227,8 +235,35 @@ def _deduplicate_items(items: list[dict]) -> list[dict]:
     return unique
 
 
+# —— 产业/金属关键词 —— 用于预过滤无关新闻（加密货币/体育/娱乐等）
+_INDUSTRY_KEYWORDS = [
+    # 金属品种
+    "铜", "铝", "铅", "锌", "镍", "锡", "钴", "锂", "钨", "钼", "锑", "锰", "铬",
+    "黄金", "白银", "铂", "钯", "稀土", "硅", "镁", "钛", "锆", "铟", "镓", "锗",
+    "铁矿石", "钢", "钢材", "螺纹钢", "热卷", "线材", "不锈钢", "电解铝", "电解铜",
+    "碳酸锂", "氢氧化锂", "钴酸锂", "三元材料", "磷酸铁锂", "电解液", "隔膜",
+    "光伏", "多晶硅", "单晶硅", "硅片", "电池级",
+    # 产业链
+    "新能源", "电动车", "动力电池", "储能", "锂电池", "钠电池", "固态电池",
+    "有色金属", "矿产", "矿山", "冶炼", "精炼", "加工费", "TC", "RC",
+    "正极", "负极", "前驱体", "六氟磷酸锂", "溶剂",
+    # 行业相关
+    "汽车", "比亚迪", "特斯拉", "宁德时代", "产业链", "供应链",
+    # 宏观/政策
+    "美联储", "加息", "降息", "利率", "央行", "PMI", "GDP", "通胀",
+    "关税", "制裁", "出口管制", "贸易战", "地缘", "冲突",
+    "基建", "房地产", "制造业", "工业增加值", "社融", "信贷",
+    "新能源车", "风电", "光伏", "储能", "特高压", "电网",
+]
+
+def _is_industry_relevant(item: dict) -> bool:
+    """检查新闻是否与金属/产业链相关（标题或摘要含关键词）"""
+    text = (item.get("title", "") + " " + item.get("summary", "")).lower()
+    return any(kw in text for kw in _INDUSTRY_KEYWORDS)
+
+
 def fetch_all_news(force: bool = False) -> list[dict]:
-    """从所有数据源获取新闻（使用文件缓存）
+    """从所有数据源获取新闻（使用文件缓存 + 全局反爬锁）
 
     Args:
         force: 强制刷新，跳过缓存
@@ -244,23 +279,20 @@ def fetch_all_news(force: bool = False) -> list[dict]:
 
     all_items: list[dict] = []
 
-    # 按顺序逐个数据源获取（反爬：每个源之间间隔）
+    # 按顺序逐个数据源获取（全局锁 + 统一退避防反爬）
     fetchers = [
         ("上海金属网", _fetch_shmet_news),
         ("东方财富", _fetch_eastmoney_global),
         ("新浪财经", _fetch_sina_global),
     ]
 
-    for i, (name, fetcher) in enumerate(fetchers):
-        if i > 0:
-            logger.info(f"反爬冷却 {SCRAPE_COOLDOWN}s...")
-            time.sleep(SCRAPE_COOLDOWN)
-
-        try:
-            items = fetcher()
-            all_items.extend(items)
-        except Exception as e:
-            logger.error(f"数据源 [{name}] 获取异常: {e}")
+    for name, fetcher in fetchers:
+        with acquire_lock():
+            try:
+                items = fetcher()
+                all_items.extend(items)
+            except Exception as e:
+                logger.error(f"数据源 [{name}] 获取异常: {e}")
 
     # 去重
     all_items = _deduplicate_items(all_items)
@@ -268,6 +300,11 @@ def fetch_all_news(force: bool = False) -> list[dict]:
 
     # 按时间倒序排列
     all_items.sort(key=lambda x: x.get("pub_time", ""), reverse=True)
+
+    # 产业关键词预过滤：丢弃与金属/产业链完全无关的新闻
+    before_filter = len(all_items)
+    all_items = [item for item in all_items if _is_industry_relevant(item)]
+    logger.info(f"关键词预过滤: {before_filter} → {len(all_items)} 条")
 
     # 写入缓存
     sources = list(set(item["source"] for item in all_items))
@@ -342,3 +379,31 @@ def get_unclassified_news(db: Session, limit: int = 50) -> list[News]:
         .limit(limit)
         .all()
     )
+
+
+def run_refresh_pipeline() -> dict:
+    """完整的刷新流水线：抓取→入库→LLM分类
+
+    供 API 端点和后台调度线程复用。
+
+    Returns:
+        {"fetch": {...}, "classify": {...}}
+    """
+    from app.services.news_classifier import classify_news_batch
+
+    db = SessionLocal()
+    try:
+        logger.info("新闻刷新流水线启动")
+        raw_items = fetch_all_news(force=True)
+        fetch_result = sync_news_to_db(db, raw_items)
+        logger.info(f"新闻入库完成: 新增 {fetch_result['inserted']}, 跳过 {fetch_result['skipped']}")
+
+        classify_result = classify_news_batch(db, limit=100)
+        logger.info(f"新闻分类完成: {classify_result['classified']} 条")
+
+        return {"fetch": fetch_result, "classify": classify_result}
+    except Exception as e:
+        logger.error(f"新闻刷新流水线失败: {e}")
+        raise
+    finally:
+        db.close()

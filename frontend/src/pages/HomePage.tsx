@@ -62,14 +62,26 @@ export default function HomePage() {
     setLastRefreshed(new Date())
   })
 
-  // 首次加载时如果新闻数量不足，提示用户刷新（不自动触发，避免 SQLite 锁库 + akshare 反爬）
+  // 首次加载时如果新闻数量不足，自动触发刷新（后端已接入全局反爬锁，安全）
   const showRefreshHint = useMemo(() => {
     if (mainQuery.isLoading || macroQuery.isLoading) return false
     const totalNews = (mainQuery.data?.total || 0) + (macroQuery.data?.total || 0)
     return totalNews < 20
   }, [mainQuery.isLoading, macroQuery.isLoading, mainQuery.data?.total, macroQuery.data?.total])
 
-  // 自动刷新
+  // 数据不足时自动触发后台刷新（仅一次，避免重复）
+  const autoRefreshed = useRef(false)
+  useEffect(() => {
+    if (autoRefreshed.current) return
+    if (mainQuery.isLoading || macroQuery.isLoading) return
+    const totalNews = (mainQuery.data?.total || 0) + (macroQuery.data?.total || 0)
+    if (totalNews < 20 && !newsRefresh.running) {
+      autoRefreshed.current = true
+      newsRefresh.startRefresh()
+    }
+  }, [mainQuery.isLoading, macroQuery.isLoading, mainQuery.data?.total, macroQuery.data?.total, newsRefresh.running])
+
+  // 自动刷新新闻列表
   useEffect(() => {
     macroQuery.refetch()
     mainQuery.refetch()

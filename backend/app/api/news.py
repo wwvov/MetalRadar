@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from app.core.database import get_db, SessionLocal
 from app.services import news_service
-from app.services.news_fetcher import fetch_all_news, sync_news_to_db
+from app.services.news_fetcher import fetch_all_news, sync_news_to_db, run_refresh_pipeline
 from app.services.news_classifier import classify_news_batch
 from app.schemas.news import NewsListResponse, FavoriteRequest
 
@@ -123,36 +123,21 @@ _refresh_status: dict = {"running": False, "message": "", "result": None}
 
 
 def _run_refresh_pipeline():
-    """后台执行完整刷新管道"""
+    """后台执行完整刷新管道（委托给 service 层）"""
     global _refresh_status
     _refresh_status = {"running": True, "message": "开始抓取新闻...", "result": None}
-    db = SessionLocal()
     try:
-        # Step 1: 抓取
         _refresh_status["message"] = "正在从 akshare 获取新闻..."
-        raw_items = fetch_all_news(force=True)
-        fetch_result = sync_news_to_db(db, raw_items)
-        _refresh_status["message"] = f"新闻抓取完成: 新增 {fetch_result['inserted']} 条"
-
-        # Step 2: LLM 分类
-        _refresh_status["message"] = "正在使用 AI 智能分类新闻..."
-        classify_result = classify_news_batch(db, limit=100)
-        _refresh_status["message"] = f"分类完成: {classify_result['classified']} 条"
-
+        result = run_refresh_pipeline()
         _refresh_status = {
             "running": False,
             "message": "刷新完成",
-            "result": {
-                "fetch": fetch_result,
-                "classify": classify_result,
-            },
+            "result": result,
         }
-        logger.info(f"新闻刷新完成: fetch={fetch_result}, classify={classify_result}")
+        logger.info(f"新闻刷新完成: {result}")
     except Exception as e:
         logger.error(f"新闻刷新失败: {e}")
         _refresh_status = {"running": False, "message": f"刷新失败: {e}", "result": None}
-    finally:
-        db.close()
 
 
 @router.post("/refresh")

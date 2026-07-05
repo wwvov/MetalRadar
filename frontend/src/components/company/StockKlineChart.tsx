@@ -225,9 +225,9 @@ export function StockKlineChart({
   const changeAmt = prev ? (latest.close - prev.close) : 0
 
   return (
-    <Card className="p-5">
+    <Card className="p-5 h-full w-full flex flex-col">
       {/* 标题栏 + 控制按钮 */}
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 shrink-0">
         <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
           <BarChart3 className="w-4 h-4 text-emerald-600" />
           市值走势
@@ -285,13 +285,15 @@ export function StockKlineChart({
       </div>
 
       {/* K线图 */}
-      <ReactEChartsCore
-        option={option}
-        style={{ height: '420px' }}
-        notMerge
-        lazyUpdate
-        opts={{ renderer: 'canvas' }}
-      />
+      <div className="flex-1 min-h-[300px]">
+        <ReactEChartsCore
+          option={option}
+          style={{ height: '100%' }}
+          notMerge
+          lazyUpdate
+          opts={{ renderer: 'canvas' }}
+        />
+      </div>
     </Card>
   )
 }

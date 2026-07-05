@@ -43,9 +43,9 @@ export function FuturesMiniChart({ materials, isLoading }: FuturesMiniChartProps
   const active = materials[selectedIdx] || materials[0]
 
   return (
-    <Card className="p-5">
+    <Card className="p-5 h-full w-full flex flex-col">
       {/* 标题 */}
-      <h3 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
+      <h3 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2 shrink-0">
         <TrendingUp className="w-4 h-4 text-amber-600" />
         敏感品种期货走势
         <span className="text-[11px] font-normal text-slate-400">
@@ -54,7 +54,7 @@ export function FuturesMiniChart({ materials, isLoading }: FuturesMiniChartProps
       </h3>
 
       {/* 品种缩略图网格 */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-3 shrink-0">
         {materials.slice(0, 6).map((m, idx) => {
           const prices = m.history_3m || []
           const changePct = m.quote?.change_pct || 0
@@ -202,12 +202,14 @@ function MainChart({ material }: { material: DashboardMaterial }) {
   if (!option) return null
 
   return (
-    <ReactEChartsCore
-      option={option}
-      style={{ height: '220px' }}
-      notMerge
-      lazyUpdate
-      opts={{ renderer: 'canvas' }}
-    />
+    <div className="flex-1 min-h-[160px]">
+      <ReactEChartsCore
+        option={option}
+        style={{ height: '100%' }}
+        notMerge
+        lazyUpdate
+        opts={{ renderer: 'canvas' }}
+      />
+    </div>
   )
 }
