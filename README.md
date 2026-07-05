@@ -5,9 +5,11 @@
 ## 功能概览
 
 - **新闻资讯** — 多源新闻聚合（东方财富/上海金属网/新浪财经）+ LLM 智能分类 + 多维度筛选
-- **我的关注** — 公司管理 + AI 产业链全景分析（Mermaid 流程图）+ 敏感原材料品种编辑
-- **公司详情** — 财务指标三分类（盈利能力/成长能力/财务健康）、股票K线、期货联动、成本压力仪表
+- **我的关注** — 公司管理 + AI 产业链全景分析（Mermaid 流程图）+ 敏感原材料品种编辑 + 收藏新闻
+- **公司详情** — 财务指标三分类（盈利能力/成长能力/财务健康）、股票K线（含PE/PB估值）、期货联动、成本压力仪表
 - **敏感金属仪表盘** — 跨公司实时报价 + 压力分析 + 价格分位 + 迷你走势图
+- **知识图谱** — 产业链关系网络可视化（规划中）
+- **AI Agent** — 智能对话分析（规划中）
 
 ## 技术栈
 
@@ -130,7 +132,7 @@ MetalRadar/
 └── frontend/
     ├── package.json
     ├── src/
-    │   ├── pages/                # 页面组件
+    │   ├── pages/                # 页面组件 (HomePage/WatchlistPage/CompanyPage/KnowledgeGraphPage/AgentPage)
     │   ├── components/           # UI 组件
     │   ├── hooks/                # React Query Hooks
     │   ├── services/             # API 调用
