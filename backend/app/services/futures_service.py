@@ -370,7 +370,11 @@ def calc_pressure(
     cost_pct: float | None,
     base_price: float | None = None,
 ) -> dict:
-    """计算成本压力等级 — 基于当前价相对基准价的涨跌幅度"""
+    """计算成本压力等级 — 基于当前价相对基准价的涨跌幅度
+
+    weighted_impact = |change_pct| × (cost_pct / 100)
+    衡量该材料价格变化对公司总成本的实际冲击（pp = 百分点）
+    """
     if base_price and base_price > 0:
         change_pct = round((current_price - base_price) / base_price * 100, 2)
     else:
@@ -384,11 +388,18 @@ def calc_pressure(
     else:
         level = "high"
 
+    # 加权影响 = 涨跌幅绝对值 × 成本占比权重
+    if cost_pct and cost_pct > 0:
+        weighted_impact = round(abs_change * (cost_pct / 100), 2)
+    else:
+        weighted_impact = None
+
     return {
         "base_price": base_price,
         "current_price": current_price,
         "change_pct": change_pct,
         "pressure_level": level,
+        "weighted_impact": weighted_impact,
     }
 
 

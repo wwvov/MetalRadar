@@ -16,7 +16,6 @@ import { FuturesMiniChart } from '@/components/company/FuturesMiniChart'
 import { DivergenceCard } from '@/components/company/DivergenceCard'
 import { FinancialMetrics } from '@/components/company/FinancialMetrics'
 import { CostPressureDashboard } from '@/components/company/CostPressureDashboard'
-import { SankeyChart } from '@/components/company/SankeyChart'
 import { ReportUpload } from '@/components/company/ReportUpload'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -123,7 +122,6 @@ export default function CompanyPage() {
   }
 
   // --- 正常渲染 ---
-  const materialNames = company.portrait?.materials?.map((m) => m.material_name) || []
   const hasFinancialReport = !!(
     company.financial_summary && company.financial_summary.report_period
   )
@@ -198,23 +196,16 @@ export default function CompanyPage() {
           existingReportTime={company.portrait_updated_at}
         />
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* 材料成本压力仪表 */}
-          <CostPressureDashboard
-            data={costPressureQuery.data as any}
-            isLoading={costPressureQuery.isLoading}
-            isError={costPressureQuery.isError}
-            onRetry={() => costPressureQuery.refetch()}
-            hasFinancialReport={hasFinancialReport}
-          />
-
-          {/* 营业成本结构桑基图 */}
-          <SankeyChart
-            financialData={financialsQuery.data}
-            materialNames={materialNames}
-            isLoading={financialsQuery.isLoading}
-          />
-        </div>
+        {/* 材料成本压力仪表 */}
+        <CostPressureDashboard
+          data={costPressureQuery.data as any}
+          isLoading={costPressureQuery.isLoading}
+          isError={costPressureQuery.isError}
+          onRetry={() => costPressureQuery.refetch()}
+          hasFinancialReport={hasFinancialReport}
+          companyId={company.id}
+          allMaterials={company.portrait?.materials || []}
+        />
       </div>
     </div>
   )

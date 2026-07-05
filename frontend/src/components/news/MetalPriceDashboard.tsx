@@ -626,6 +626,7 @@ export function MetalPriceDashboard({ follows, className }: Props) {
                       change_pct: activeOverviewMetal.quote.change_pct,
                       pressure_level: Math.abs(activeOverviewMetal.quote.change_pct) < 5 ? 'low' :
                         Math.abs(activeOverviewMetal.quote.change_pct) < 15 ? 'medium' : 'high',
+                      weighted_impact: null,
                     },
                   }} />
                 )}

@@ -199,7 +199,7 @@ export function ReportUpload({
 
           {/* 说明 */}
           <p className="text-[10px] text-slate-400 mt-2">
-            上传财报后，系统将自动提取关键财务指标并更新成本压力仪表和桑基图。
+            上传财报后，系统将自动提取关键财务指标并更新成本压力仪表。
             若文件为扫描件/图片PDF，AI可能无法正确提取文本。
           </p>
         </div>

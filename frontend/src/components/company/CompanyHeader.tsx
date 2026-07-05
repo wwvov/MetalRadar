@@ -73,7 +73,7 @@ export function CompanyHeader({ company, follows, onSwitchCompany, loading }: Co
   const { portrait } = company
 
   return (
-    <Card className="p-5">
+    <Card className="p-5 overflow-visible">
       {/* 第一行：公司名称 + 切换器 */}
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">

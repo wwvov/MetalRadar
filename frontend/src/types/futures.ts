@@ -40,6 +40,7 @@ export interface PressureData {
   current_price: number
   change_pct: number
   pressure_level: 'low' | 'medium' | 'high'
+  weighted_impact: number | null
 }
 
 export interface DashboardMaterial {

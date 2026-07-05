@@ -38,6 +38,19 @@
 - **获取方式**：查看某公司详情时，拉取最近4个季度的全市场数据，筛选该公司记录，缓存一天。
 - **字段映射**：`营业总收入`→营业收入，`营业总支出-营业支出`→营业成本，`净利润`→净利润，`经营性现金流-现金流量净额`→经营现金流。
 
+## 财报上传与AI提取
+- 上传接口 `POST /companies/{id}/upload-report` 接收 PDF，后端使用 `PyPDF2` 或 `pdfplumber` 提取文本。
+- 将文本送入大模型，按照 `5-ai-capabilities.md` 中定义的财报提取 Prompt 获取结构化 JSON。
+- 提取结果存入 `financial_reports` 表，并同时更新 `company_materials` 中的成本占比（若提取到更精确值）。
+- 若大模型提取失败（返回大量 null），返回明确错误信息，前端提示“解析失败，请确认文件是否为标准财报PDF”。
+
+## 财务数据聚合接口
+- `GET /companies/{id}/financials` 应实现数据优先级：
+  1. 检查 `financial_reports` 表中是否有 `extraction_source='user_edit'` 的记录（用户修正），有则使用。
+  2. 否则检查是否有 `extraction_source='report_ai'` 的记录（财报AI提取），有则使用最新一条。
+  3. 否则调用东方财富三大报表接口，聚合最近四个季度数据，并标注 `source='api'`。
+  4. 都无数据时返回空数组，`source='none'`。
+
 ## 期货数据接入
 - **数据源**：新浪财经 akshare 接口。
   - 历史K线：`futures_zh_daily_sina(symbol)`，支持连续合约（品种代码+0）和具体月份合约。
@@ -102,7 +115,6 @@ if (error) return <ErrorCard onRetry={refetch} />;
 - 封装为独立组件，接收数据 props。
 - 通用配置（颜色、tooltip、grid）集中在 utils/echarts-config.ts。
 - K线图：series.type: 'candlestick'，数据格式 [open, close, low, high]。
-- 桑基图：series.type: 'sankey'，数据格式 {nodes, links}。
 - 仪表盘：使用 ECharts 的 gauge + heatmap + line 组合。
 - 图表的数据完全来自 props，组件内部不预设任何数据。
 
