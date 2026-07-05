@@ -15,7 +15,6 @@ import { useCompanyDetail } from '@/hooks/useCompany'
 import { companyService } from '@/services/companyService'
 import { useQueryClient } from '@tanstack/react-query'
 import { ErrorCard } from '@/components/news/ErrorCard'
-import { formatCurrency } from '@/utils/formatters'
 import {
   Pencil,
   Save,
@@ -23,7 +22,6 @@ import {
   Trash2,
   Plus,
   X,
-  Upload,
   Loader2,
 } from 'lucide-react'
 import { MermaidDiagram } from '@/components/watchlist/MermaidDiagram'
@@ -194,7 +192,7 @@ export function CompanyPortrait({ company, onRegenerate, onDelete }: CompanyPort
     return <ErrorCard onRetry={() => refetch()} />
   }
 
-  const { portrait, financial_summary } = data
+  const { portrait } = data
 
   return (
     <div className="space-y-4">
@@ -719,67 +717,6 @@ export function CompanyPortrait({ company, onRegenerate, onDelete }: CompanyPort
         )}
       </Card>
 
-      {/* ===== 区域四：财报基准数据（只读） ===== */}
-      {financial_summary && (
-        <Card className="p-5">
-          <h3 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
-            <span className="w-1 h-4 bg-blue-500 rounded-full" />
-            财报基准数据
-            <Badge variant="secondary" className="text-[10px] bg-slate-100 text-slate-500 border-0">只读</Badge>
-          </h3>
-          <p className="text-xs text-slate-400 mb-3 flex items-center gap-2">
-            数据对应报告期：{financial_summary.report_period}
-            {reportFile && (
-              <span className="text-emerald-600 flex items-center gap-1">
-                <Upload className="w-3 h-3" />
-                新财报已上传
-              </span>
-            )}
-          </p>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
-            <div className="text-center p-3 bg-slate-50 rounded-lg">
-              <p className="text-xs text-slate-500 mb-1">营业收入</p>
-              <p className="text-base font-bold text-slate-800">
-                {financial_summary.revenue != null
-                  ? formatCurrency(financial_summary.revenue, 'yi')
-                  : '—'}
-              </p>
-            </div>
-            <div className="text-center p-3 bg-slate-50 rounded-lg">
-              <p className="text-xs text-slate-500 mb-1">毛利率</p>
-              <p className="text-base font-bold text-slate-800">
-                {financial_summary.gross_margin != null
-                  ? `${financial_summary.gross_margin}%`
-                  : '—'}
-              </p>
-            </div>
-            <div className="text-center p-3 bg-slate-50 rounded-lg">
-              <p className="text-xs text-slate-500 mb-1">直接材料占比</p>
-              <p className="text-base font-bold text-slate-800">
-                {financial_summary.direct_material_pct != null
-                  ? `${financial_summary.direct_material_pct}%`
-                  : '—'}
-              </p>
-            </div>
-            <div className="text-center p-3 bg-slate-50 rounded-lg">
-              <p className="text-xs text-slate-500 mb-1">直接人工占比</p>
-              <p className="text-base font-bold text-slate-800">
-                {financial_summary.direct_labor_pct != null
-                  ? `${financial_summary.direct_labor_pct}%`
-                  : '—'}
-              </p>
-            </div>
-            <div className="text-center p-3 bg-slate-50 rounded-lg">
-              <p className="text-xs text-slate-500 mb-1">制造费用占比</p>
-              <p className="text-base font-bold text-slate-800">
-                {financial_summary.manufacturing_pct != null
-                  ? `${financial_summary.manufacturing_pct}%`
-                  : '—'}
-              </p>
-            </div>
-          </div>
-        </Card>
-      )}
     </div>
   )
 }
