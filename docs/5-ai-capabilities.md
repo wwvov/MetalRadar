@@ -161,13 +161,18 @@ LLM 扮演中国注册会计师，从 PDF 文本中提取**扁平 JSON**：
 查询财务数据时的合并策略：
 
 ```
-user_edit（用户修正）→ 东方财富 API（akshare）→ report_ai（LLM 兜底）
+user_edit（用户修正）→ 东方财富 API（akshare 四大接口）→ report_ai（LLM 兜底）
 ```
 
 - API 数据完整时直接返回，仅缺 `cost`/`gross_margin` 时才从 AI 报告补充
-- 季度趋势 `quarters[]` 始终从 API 获取（按报告期缓存，跨公司共享）
+- 季度趋势 `quarters[]` 始终从 API 获取（按报告期缓存，跨公司共享）。API 来源包括：
+  - `stock_lrb_em` — 利润表（营收/成本/净利润）
+  - `stock_zcfz_em` — 资产负债表（总资产/总负债/股东权益）
+  - `stock_xjll_em` — 现金流量表（经营性现金流净额）
+  - `stock_financial_analysis_indicator` — 财务分析指标（扣非净利润等86项）
 - `net_margin = net_profit / revenue × 100`，由后端自动计算
 - API 完全不可用时才回退到 LLM 提取数据
+- 反爬控制：连续 API 调用间隔随机 0.3~1.0s，按报告期缓存 6h，按股票代码缓存 1d
 
 ---
 

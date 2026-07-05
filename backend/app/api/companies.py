@@ -205,6 +205,28 @@ def get_financials(company_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"获取财务数据失败: {str(e)}")
 
 
+@router.post("/{company_id}/analyze-chain")
+def analyze_chain(company_id: str, db: Session = Depends(get_db)):
+    """使用 LLM 分析公司在产业链中的完整位置
+
+    生成内容包括:
+    1. Mermaid 产业链全景流程图
+    2. 各环节业务说明（上游→中游→下游→其他）
+    3. 产业链位置总结（覆盖环节、核心环节、精准标签、综合解读）
+
+    结果存储在 company.chain_analysis JSON 字段中，后续请求直接返回缓存。
+    传 force=true 可强制重新生成。
+    """
+    try:
+        result = company_service.analyze_company_chain(db, company_id)
+        return {"ok": True, "data": result}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"产业链分析失败 {company_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"产业链分析失败: {str(e)}")
+
+
 @router.get("/{company_id}/cost-pressure")
 def get_cost_pressure(company_id: str, db: Session = Depends(get_db)):
     """获取公司材料成本压力数据

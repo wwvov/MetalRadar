@@ -18,7 +18,7 @@ from app.schemas.company import (
     FinancialSummaryOut,
     PortraitUpdateIn,
 )
-from app.services.llm_service import generate_company_portrait, PortraitGenerationError
+from app.services.llm_service import generate_company_portrait, analyze_industry_chain, PortraitGenerationError
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +203,54 @@ def get_company_detail(db: Session, company_id: str) -> CompanyDetailOut | None:
         financial_summary=financial_summary,
         portrait_generated=bool(company.portrait_generated),
         portrait_updated_at=company.portrait_updated_at,
+        chain_analysis=company.chain_analysis,
     )
+
+
+def analyze_company_chain(db: Session, company_id: str, force: bool = False) -> dict:
+    """调用 LLM 分析公司在产业链中的完整位置，结果缓存到 company.chain_analysis
+
+    Args:
+        db: 数据库会话
+        company_id: 股票代码
+        force: 是否强制重新生成（忽略已有缓存）
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise ValueError(f"公司不存在: {company_id}")
+
+    # 有缓存且不强制刷新，直接返回
+    if company.chain_analysis and not force:
+        logger.info(f"公司 {company_id} 产业链分析命中缓存")
+        return company.chain_analysis
+
+    # 构建 materials 列表供 LLM 参考
+    materials = [
+        {
+            "material_name": m.material_name,
+            "cost_pct": float(m.cost_pct) if m.cost_pct else None,
+            "direction": m.direction or "negative",
+        }
+        for m in company.materials
+    ]
+
+    logger.info(f"公司 {company_id} 开始 LLM 产业链分析...")
+    result = analyze_industry_chain(
+        company_name=company.name,
+        company_code=company_id,
+        industry=company.industry or "",
+        business_desc=company.business_desc or "",
+        position=company.position or "",
+        position_detail=company.position_detail or "",
+        materials=materials,
+    )
+
+    # 缓存到数据库
+    company.chain_analysis = result
+    db.commit()
+    logger.info(f"公司 {company_id} 产业链分析完成并缓存")
+
+    return result
 
 
 def _looks_like_stock_code(name: str) -> bool:

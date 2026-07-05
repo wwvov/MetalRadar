@@ -20,7 +20,7 @@ DEFAULT_USER = "default"
 def list_news(
     tab: str = Query(
         "all",
-        description="Tab: all|followed_companies|sensitive_metals|macro|macro_panel|shmet_block",
+        description="Tab: all|followed_companies|sensitive_metals|macro|macro_panel|shmet_block|favorites",
     ),
     company: str | None = Query(None, description="单个公司筛选"),
     companies: str | None = Query(None, description="多公司筛选(逗号分隔)"),

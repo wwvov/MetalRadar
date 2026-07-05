@@ -15,12 +15,12 @@ export function FavoriteNews() {
   const { follows } = useWatchlist()
   const [companyFilter, setCompanyFilter] = useState<string | null>(null)
 
-  const { data, isLoading, isError, refetch } = useNews('all')
+  const { data, isLoading, isError, refetch } = useNews('favorites')
 
   const handleFavorite = useCallback(
-    async (newsId: string, _linkedCompanyId?: string | null) => {
+    async (newsId: string, linkedCompanyId?: string | null) => {
       try {
-        await newsService.favoriteNews(newsId)
+        await newsService.favoriteNews(newsId, linkedCompanyId)
         queryClient.invalidateQueries({ queryKey: ['news'] })
       } catch {}
     },

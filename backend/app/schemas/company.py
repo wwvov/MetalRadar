@@ -77,6 +77,7 @@ class CompanyDetailOut(BaseModel):
     financial_summary: Optional[FinancialSummaryOut] = None
     portrait_generated: bool = False
     portrait_updated_at: Optional[datetime] = None
+    chain_analysis: Optional[dict] = None
 
     class Config:
         from_attributes = True

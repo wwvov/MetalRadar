@@ -367,7 +367,8 @@ def get_stock_info(code: str) -> dict:
         import akshare as ak
 
         info = {"code": code, "total_market_cap": None, "circulating_market_cap": None,
-                "industry": "", "total_shares": None, "circulating_shares": None}
+                "industry": "", "total_shares": None, "circulating_shares": None,
+                "pe": None, "pb": None}
 
         # --- 数据源1（优先）: stock_zh_a_spot_em 全市场实时行情 ---
         # 一次API调用覆盖所有A股，5分钟共享缓存，比 per-stock 调用反爬风险低得多
@@ -379,7 +380,12 @@ def get_stock_info(code: str) -> dict:
                     info["total_market_cap"] = float(mc) if mc and mc != "-" else None
                     cmc = row.get("流通市值")
                     info["circulating_market_cap"] = float(cmc) if cmc and cmc != "-" else None
-                    logger.info(f"公司信息 {code} 从全市场行情获取市值: {info['total_market_cap']}")
+                    # 市盈率(动态) & 市净率 — akshare spot 行情包含这两个字段
+                    pe_val = row.get("市盈率-动态")
+                    info["pe"] = float(pe_val) if pe_val is not None and pe_val != "-" and float(pe_val) > 0 else None
+                    pb_val = row.get("市净率")
+                    info["pb"] = float(pb_val) if pb_val is not None and pb_val != "-" and float(pb_val) > 0 else None
+                    logger.info(f"公司信息 {code} 从全市场行情获取: 市值={info['total_market_cap']}, PE={info['pe']}, PB={info['pb']}")
                     break
         except Exception as e:
             logger.warning(f"公司信息 {code} spot_em 失败: {e}")
@@ -406,6 +412,10 @@ def get_stock_info(code: str) -> dict:
                         info["total_shares"] = float(val) if val and val != "-" else None
                     elif key == "流通股":
                         info["circulating_shares"] = float(val) if val and val != "-" else None
+                    elif key in ("市盈率-动态", "市盈率"):
+                        info["pe"] = float(val) if val and val != "-" and float(val) > 0 else None
+                    elif key in ("市净率",):
+                        info["pb"] = float(val) if val and val != "-" and float(val) > 0 else None
 
                 logger.info(f"公司信息 {code} 获取成功(individual_info)")
             except Exception as e:

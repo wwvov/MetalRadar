@@ -32,11 +32,17 @@
 
 ## 财务报表数据接入
 - **数据源**：东方财富数据中心，通过 akshare 批量获取。
+  - 利润表：`stock_lrb_em(date)` → 营收/成本/利润（**不含扣非净利润**）
   - 资产负债表：`stock_zcfz_em(date)` → 资产/负债/权益
-  - 利润表：`stock_lrb_em(date)` → 营收/成本/利润
   - 现金流量表：`stock_xjll_em(date)` → 经营性现金流等
-- **获取方式**：查看某公司详情时，拉取最近4个季度的全市场数据，筛选该公司记录，缓存一天。
-- **字段映射**：`营业总收入`→营业收入，`营业总支出-营业支出`→营业成本，`净利润`→净利润，`经营性现金流-现金流量净额`→经营现金流。
+  - 财务分析指标：`stock_financial_analysis_indicator(code, start_year)` → 86项指标（含扣非净利润），按股票代码获取
+- **获取方式**：查看某公司详情时，拉取最近4个季度的全市场数据（利润表/资产负债表/现金流量表按报告期缓存，跨公司共享），筛选该公司记录。扣非净利润按股票代码单独获取（累计值转为单季度值）。结果缓存一天。
+- **字段映射**：
+  - 利润表：`营业总收入`→营业收入，`营业总支出-营业支出`→营业成本，`净利润`→净利润
+  - 资产负债表：`资产-总资产`→总资产，`负债-总负债`→总负债，`股东权益合计`→股东权益
+  - 现金流量表：`经营性现金流-现金流量净额`→经营现金流净额
+  - 财务分析指标：`扣除非经常性损益后的净利润(元)`→扣非净利润
+- **反爬控制**：连续 akshare API 调用之间添加随机延迟 0.3~1.0s，仅在真正发起网络请求时（命中缓存则跳过）。按报告期缓存6小时，按股票代码缓存1天。
 
 ## 财报上传与AI提取
 - 上传接口 `POST /companies/{id}/upload-report` 接收 PDF，后端使用 `PyPDF2` 或 `pdfplumber` 提取文本。
@@ -46,10 +52,11 @@
 
 ## 财务数据聚合接口
 - `GET /companies/{id}/financials` 应实现数据优先级：
-  1. 检查 `financial_reports` 表中是否有 `extraction_source='user_edit'` 的记录（用户修正），有则使用。
-  2. 否则检查是否有 `extraction_source='report_ai'` 的记录（财报AI提取），有则使用最新一条。
-  3. 否则调用东方财富三大报表接口，聚合最近四个季度数据，并标注 `source='api'`。
+  1. 检查 `financial_reports` 表中是否有 `extraction_source='user_edit'` 的记录（用户修正），有则使用；季度趋势数据（`quarters[]`）由 API 补充。
+  2. 否则调用东方财富四大接口（利润表+资产负债表+现金流量表+财务分析指标），聚合最近四个季度数据，并标注 `source='api'`。若API缺 `cost`/`gross_margin`，从AI报告补充。
+  3. 否则检查是否有 `extraction_source='report_ai'` 的记录（财报AI提取），有则使用最新一条，季度趋势由API补充。
   4. 都无数据时返回空数组，`source='none'`。
+- 返回字段：`company_id`, `company_name`, `source`, `quarters[]`（含 `revenue`/`cost`/`net_profit`/`operating_profit`/`deducted_net_profit`/`total_assets`/`total_liabilities`/`equity`/`operating_cashflow`），摘要级 `revenue`/`cost`/`net_profit`/`deducted_net_profit`/`gross_margin`/`net_margin`/`total_assets`/`total_liabilities`/`operating_cashflow`/`direct_material_pct`/`direct_labor_pct`/`manufacturing_pct`/`report_period`。
 
 ## 期货数据接入
 - **数据源**：新浪财经 akshare 接口。
@@ -134,11 +141,13 @@ if (error) return <ErrorCard onRetry={refetch} />;
 - 种子数据（3家公司 + 30+条新闻）
 
 ### Sprint 2 🔧 进行中
-- 公司详情页（占位中）
-- K线图/财务卡片/成本压力仪表（后端 service 已实现，前端 API 路由待对接）
+- 公司详情页 ✅ 已完成（公司切换器、K线图、期货迷你图、背离分析、财务指标三分类、季度趋势图、成本压力仪表）
+- 财务指标重组 ✅ 已完成（盈利能力/成长能力/财务健康三分类、扣非净利润/同比增速/资产负债率/经营现金流等10项指标）
+- K线图 ✅ 已完成（日/周/月切换、MA均线、成交量副图）
+- 财报上传 ✅ 已完成（PDF上传、LLM提取、数据优先级合并）
 - 敏感金属仪表盘 ✅ 已完成（MetalPriceDashboard：实时报价、成本压力、价格分位热力图、迷你K线、跨公司总览）
-- 期货深度数据：报价 ✅ | 分位图 ✅ | 波动率锥 📋 | 背离分析 📋
-- 公司详情股票K线 📋
+- 期货深度数据：报价 ✅ | 分位图 ✅ | 波动率锥 📋 | 背离分析 ✅
+- 反爬机制 ✅ 全局优化（随机延迟0.3~1.0s、按报告期缓存、按股票代码缓存）
 
 ### Sprint 3 📋 规划中
 - AI Agent 对话（三个场景：风险扫描/事件推演/自由问答）

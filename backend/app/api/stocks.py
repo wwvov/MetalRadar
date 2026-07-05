@@ -44,9 +44,9 @@ def get_kline(
 
 @router.get("/{code}/info")
 def get_stock_info(code: str):
-    """获取A股公司基本信息（总市值、流通市值、行业、总股本等）
+    """获取A股公司基本信息（总市值、市盈率、市净率、行业、总股本等）
 
-    数据源: akshare stock_individual_info_em，缓存1天。
+    数据源: akshare stock_zh_a_spot_em 全市场行情 + stock_individual_info_em 兜底，缓存1天。
     """
     if not code or len(code) != 6 or not code.isdigit():
         raise HTTPException(status_code=400, detail="股票代码格式错误，需为6位数字")

@@ -42,13 +42,14 @@ frontend/src/
 │   ├── CompanyPage.tsx     # 公司详情（Sprint 2 实现中）
 │   └── AgentPage.tsx       # AI Agent（Sprint 3 待实现）
 ├── components/
-│   ├── ui/                 # shadcn/ui 组件 (Button, Card, Tabs, Dialog, Drawer, Badge, Skeleton, Tooltip 等)
-│   ├── news/               # NewsCard, NewsTabs, NewsFilters, MacroTicker, ShmetBlock, MetalPriceDashboard, FavoritePopover, EmptyGuide
-│   └── watchlist/          # CompanyCard, CompanyDetail, AddCompanyDrawer, AddCompanyDialog, PortraitEditor
-├── hooks/                  # useNews, useCompany, useFutures, useNewsRefresh, useUser (每个返回 React Query 对象)
-├── services/               # api.ts (axios 实例), newsService.ts, companyService.ts, futuresService.ts, userService.ts
-├── types/                  # news.ts, company.ts, futures.ts, user.ts (类型与接口)
-├── providers/              # query-provider.tsx
+│   ├── ui/                 # shadcn/ui 组件 (Button, Card, Tabs, Dialog, Drawer, Badge, Skeleton, Tooltip, Slider 等)
+│   ├── news/               # NewsCard, NewsSkeleton, MacroPanel, MacroTicker, ShmetBlock, MetalPriceDashboard, FavoritePopover, EmptyGuide, ErrorCard
+│   ├── watchlist/          # CompanyCard, CompanyPortrait, AddCompanyDrawer, FavoriteNews
+│   └── company/            # CompanyHeader, StockKlineChart, FuturesMiniChart, DivergenceCard, FinancialMetrics, CostPressureDashboard, ReportUpload
+├── hooks/                  # useNews, useCompany, useFutures, useStock, useFollows, useNewsRefresh (每个返回 React Query 对象)
+├── services/               # api.ts (axios 实例), newsService.ts, companyService.ts, futuresService.ts, stockService.ts, userService.ts
+├── types/                  # news.ts, company.ts, futures.ts, agent.ts (类型与接口)
+├── providers/              # query-provider.tsx, watchlist-context.tsx
 └── lib/                    # utils.ts (cn 工具函数)
 ```
 
@@ -79,7 +80,8 @@ backend/
 │   │   ├── news_fetcher.py    # 多源新闻抓取 (3个源) + 去重入库
 │   │   ├── news_classifier.py # LLM 新闻批量分类 (事件/情绪/实体)
 │   │   ├── news_service.py    # 新闻查询/过滤/关联度计算
-│   │   ├── company_service.py # 公司搜索/画像生成/材料管理
+│   │   ├── company_service.py # 公司搜索/画像生成/材料管理/财务数据聚合
+│   │   ├── stock_service.py   # 股票K线/财务数据(利润表+资产负债表+现金流量表+财务分析指标)/反爬控制
 │   │   ├── futures_service.py # 期货K线/报价/分位/波动率锥
 │   │   └── llm_service.py     # LLM 调用封装 (DeepSeek)
 │   └── core/

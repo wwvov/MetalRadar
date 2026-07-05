@@ -57,9 +57,10 @@ Base URL: `/api`
 - **全量拉取**：用户手动触发 `/news/refresh` 时遍历所有必要 symbol 抓取，结果统一做实体识别、去重、情绪分析后存入数据库。
 - **频率控制**：
   - 同一数据源两次请求间隔不低于 **5 秒**（`SCRAPE_COOLDOWN = 5`）。
+  - 财务数据连续 API 调用间隔随机 **0.3~1.0 秒**，仅在实际发起网络请求时生效（命中缓存则跳过）。
   - 个股新闻接口 `stock_news_em` 仅对已关注公司拉取，每个公司每天最多拉取一次。
   - 同花顺相关接口必须遵守 **单次调用 + 缓存** 原则，严禁高频轮询。
-- **缓存策略**：所有拉取结果以 JSON 文件缓存（`.cache/` 目录），新闻类 TTL=300s（5分钟），公司信息类 TTL=86400s（1天）。
+- **缓存策略**：所有拉取结果以 JSON 文件缓存（`.cache/` 目录），新闻类 TTL=300s（5分钟），公司信息类 TTL=86400s（1天），报告期数据 TTL=6小时。
 - **前端调用**：前端仅调用统一的 `/api/news` 聚合接口，不直接接触第三方源。
 
 ---
@@ -87,15 +88,26 @@ Base URL: `/api`
 - `POST /companies/{id}/regenerate`
   → 强制重新生成公司 AI 画像
 
+### 财务数据接口 ✅
+- `GET /companies/{id}/financials`
+  → 聚合财务数据，按优先级合并多源：`user_edit` > 东方财富API > `report_ai`。返回 `FinancialData`（含季度趋势 `quarters[]`、核心指标摘要、数据来源标签）。
+- `POST /companies/{id}/upload-report`
+  → multipart 上传财报PDF，LLM提取财务指标存入 `financial_reports` 表。同时刷新公司详情、财务数据、成本压力缓存。
+- `GET /companies/{id}/cost-pressure`
+  → 按公司材料返回成本压力分析（基准价、当前价、涨跌幅、压力等级、毛利率影响估算）。
+- `GET /companies/{id}/divergence`
+  → 股票 vs 期货价格背离分析（60日滚动相关系数 + AI解读文本）。
+
 ### 后端数据源（供后端实现参考）
 | 来源 | 底层接口 | 说明 |
 |------|---------|------|
 | 东方财富-个股信息 | `ak.stock_individual_info_em(symbol)` | 传入6位数字代码，返回总股本、流通股、总市值、流通市值、行业、上市时间等。用于补全公司基础信息。 |
 | 雪球-公司概况 | `ak.stock_individual_basic_info_xq(symbol)` | 传入如 `SH601127`，返回公司简介、主营业务等文本。可用于画像生成时补充业务描述。 |
 | 同花顺-主营介绍 | `ak.stock_zyjs_ths(symbol)` | 传入6位数字代码，返回主营业务、产品类型、产品名称、经营范围等结构化字段。适合作为公司画像的权威业务描述来源。**注意：该接口有反爬限制，仅应在用户确认添加公司时调用一次，结果缓存至少 1 天，严禁高频调用。** |
-| 东方财富-资产负债表 | `ak.stock_zcfz_em(date)` | 传入报告期如 `20240331`，返回全市场公司的资产、负债、股东权益等字段。用于提取单个公司的资产负债表数据。 |
-| 东方财富-利润表 | `ak.stock_lrb_em(date)` | 传入报告期，返回全市场公司的营业收入、营业成本、费用、利润等。 |
-| 东方财富-现金流量表 | `ak.stock_xjll_em(date)` | 传入报告期，返回全市场公司的经营性/投资性/融资性现金流净额及同比增长。 |
+| 东方财富-资产负债表 | `ak.stock_zcfz_em(date)` | 传入报告期如 `20240331`，返回全市场公司的资产/负债/权益等字段。关键列名：`资产-总资产`、`负债-总负债`、`股东权益合计`。 |
+| 东方财富-利润表 | `ak.stock_lrb_em(date)` | 传入报告期，返回全市场公司的营业收入、营业成本、费用、利润等。**不含扣非净利润**。 |
+| 东方财富-现金流量表 | `ak.stock_xjll_em(date)` | 传入报告期，返回全市场公司的经营性/投资性/融资性现金流净额。关键列名：`经营性现金流-现金流量净额`。 |
+| 东方财富-财务分析指标 | `ak.stock_financial_analysis_indicator(symbol, start_year)` | **按股票代码获取**，返回86项财务指标（含`扣除非经常性损益后的净利润(元)`、资产负债率等）。用于补充 `stock_lrb_em` 缺失的扣非净利润字段。累计值需转为单季度值。 |
 
 ---
 
@@ -111,12 +123,12 @@ Base URL: `/api`
 - `GET /futures/prefetch`
   → 预热期货缓存（应用启动时自动执行）
 
-### 期货K线 📋
+### 期货K线 ✅
 - `GET /futures/{contract}/kline?period=daily&from=&to=`
   → `{ data: [{date, open, high, low, close, volume, hold}] }`
   数据源：新浪财经 `ak.futures_zh_daily_sina(symbol)`。合约代码需转换为连续合约格式（品种代码+0，如 `RB0`、`LC0`）。
 
-### 期货实时行情 📋
+### 期货实时行情 ✅
 - `GET /futures/{contract}/quote`
   → `{ contract, price, change_pct, open, high, low, volume, open_interest, timestamp }`
   数据源：新浪财经 `ak.futures_zh_realtime(symbol=品种中文名)`。
@@ -135,15 +147,15 @@ Base URL: `/api`
 | AG主力 | 白银 | AG0 | 上期所 |
 | 无期货品种 | 钴 / 稀土 | 退至现货 | 通过上海金属网快讯获取现货价 |
 
-### 其他图表数据 📋（Sprint 2 待完成）
-- `GET /futures/{contract}/volatility-cone` — 波动率锥
-- `GET /futures/{contract}/price-percentile` — 价格分位图
-- `GET /companies/{id}/divergence?material=铜` — 价格背离分析
-- `GET /companies/{id}/cost-pressure` — 材料成本压力
+### 其他图表数据 🔧（部分完成）
+- `GET /futures/{contract}/volatility-cone` — 波动率锥 📋
+- `GET /futures/{contract}/price-percentile` — 价格分位图 ✅
+- `GET /companies/{id}/divergence` — 价格背离分析 ✅
+- `GET /companies/{id}/cost-pressure` — 材料成本压力 ✅
 
 ---
 
-## 股票K线 📋（Sprint 2 待完成）
+## 股票K线 ✅
 
 - `GET /stocks/{code}/kline?frequency=daily&from=&to=&adjustflag=2`
   → `{ data: [{date, open, high, low, close, volume, amount, turn, pctChg, ...}] }`

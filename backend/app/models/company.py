@@ -17,6 +17,7 @@ class Company(Base):
     position_detail = Column(String(100), comment="细分环节描述")
     portrait_generated = Column(Boolean, default=False, comment="画像是否已由AI生成")
     portrait_updated_at = Column(DateTime, comment="画像最后更新时间")
+    chain_analysis = Column(JSON, comment="产业链完整分析(LLM生成)")
 
     # 关系
     materials = relationship("CompanyMaterial", back_populates="company", cascade="all, delete-orphan")

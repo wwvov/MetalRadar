@@ -1,5 +1,5 @@
 import api from './api'
-import type { CompanySearchResult, CompanyDetail, PortraitUpdatePayload, FinancialData, CostPressure, DivergenceAnalysis, ApiResponse } from '@/types/company'
+import type { CompanySearchResult, CompanyDetail, PortraitUpdatePayload, FinancialData, CostPressure, DivergenceAnalysis, ChainAnalysis, ApiResponse } from '@/types/company'
 
 export const companyService = {
   searchCompanies: async (keyword: string): Promise<CompanySearchResult> => {
@@ -71,6 +71,12 @@ export const companyService = {
     const { data } = await api.get<ApiResponse<DivergenceAnalysis>>(`/companies/${companyId}/divergence`, {
       params: material ? { material } : {},
     })
+    return data.data
+  },
+
+  /** 使用LLM分析公司在产业链中的完整位置 */
+  analyzeChain: async (companyId: string): Promise<ChainAnalysis> => {
+    const { data } = await api.post<{ ok: boolean; data: ChainAnalysis }>(`/companies/${companyId}/analyze-chain`)
     return data.data
   },
 }

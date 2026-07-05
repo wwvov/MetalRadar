@@ -41,7 +41,7 @@ export function CompanyHeader({ company, follows, onSwitchCompany, loading, stoc
   const [showSwitcher, setShowSwitcher] = useState(false)
   const [switcherSearch, setSwitcherSearch] = useState('')
 
-  // 计算估值指标
+  // 计算估值指标（后端akshare数据优先，客户端计算兜底）
   const marketCap = stockInfo?.total_market_cap
   const latestQuarter = financialData?.quarters?.[0]
   // 净资产: 优先取 equity 字段, 其次用 总资产-总负债 推算
@@ -51,10 +51,20 @@ export function CompanyHeader({ company, follows, onSwitchCompany, loading, stoc
       : null)
   const revenue = financialData?.revenue  // 最新季度营业收入
 
-  // 市净率 PB = 总市值 / 净资产
-  const pb = (marketCap != null && equity != null && equity > 0)
-    ? (marketCap / equity).toFixed(2)
-    : null
+  // 近4个季度净利润合计（用于PE兜底计算）
+  const ttmNetProfit = (financialData?.quarters || [])
+    .slice(0, 4)
+    .reduce((sum, q) => sum + (q.net_profit ?? 0), 0)
+
+  // 市盈率 PE = 总市值 / 近4季度净利润合计（优先用后端 akshare 直接返回的数据）
+  const pe = stockInfo?.pe != null
+    ? stockInfo.pe.toFixed(2)
+    : (marketCap != null && ttmNetProfit > 0 ? (marketCap / ttmNetProfit).toFixed(2) : null)
+
+  // 市净率 PB = 总市值 / 净资产（优先用后端 akshare 直接返回的数据）
+  const pb = stockInfo?.pb != null
+    ? stockInfo.pb.toFixed(2)
+    : (marketCap != null && equity != null && equity > 0 ? (marketCap / equity).toFixed(2) : null)
 
   // 市销率 PS = 总市值 / 年化营业收入 (单季×4)
   const ps = (marketCap != null && revenue != null && revenue > 0)
@@ -108,6 +118,13 @@ export function CompanyHeader({ company, follows, onSwitchCompany, loading, stoc
               <Badge variant="secondary" className="text-[11px] bg-slate-100 text-slate-600 border-0">
                 {company.industry}
               </Badge>
+            )}
+            {/* 估值指标：市盈率 PE */}
+            {pe != null && (
+              <span className="text-xs text-slate-500 font-normal" title="市盈率 = 总市值 / 近4季度净利润合计">
+                <span className="text-slate-400">PE</span>{' '}
+                <span className="font-semibold text-slate-700">{pe}</span>
+              </span>
             )}
             {/* 估值指标：市净率 PB */}
             {pb != null && (

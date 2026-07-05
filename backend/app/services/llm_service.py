@@ -355,6 +355,187 @@ def _fallback_portrait(company_name: str, company_code: str) -> dict:
     }
 
 
+CHAIN_ANALYSIS_SYSTEM_PROMPT = """你是一位资深的中国产业链分析师，专门研究A股上市公司的产业链全景定位。
+
+你的任务是基于提供的公司信息，生成一份完整的产业链位置分析报告。请严格输出JSON，不要添加任何解释文字。
+
+## JSON格式要求:
+{
+  "mermaid": "Mermaid graph LR 或 graph TB 代码，绘制产业链上下游结构。用不同颜色标注公司所在环节（该公司环节用#22c55e填充色）。节点用中文。",
+  "segments": [
+    {
+      "level": "upstream/midstream/downstream/auxiliary",
+      "label": "环节名称(如:上游矿产资源)",
+      "details": [
+        {
+          "business": "具体业务名称",
+          "description": "该业务在产业链中的价值定位及其对公司的重要性",
+          "company_involved": true/false
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "covered_segments": ["公司覆盖的产业链环节列表"],
+    "core_segment": "最核心、最具话语权的主环节",
+    "full_label": "最精准的产业链位置标签(如:上游资源+中游制造一体化/中游电池制造商/下游整车制造商/全产业链布局)",
+    "analysis_text": "200字内的产业链位置综合解读"
+  }
+}
+
+## 产业链层级定义:
+- upstream(上游): 原材料/资源端 — 如矿产开采、基础化工原料、电子元器件、农产品等
+- midstream(中游): 制造/加工/代工端 — 如冶炼、零部件生产、组装、软件研发等
+- downstream(下游): 终端产品/服务端 — 如整车制造、消费电子、零售、SaaS服务等
+- auxiliary(辅助): 流通/配套环节 — 如物流、渠道、售后、回收等
+
+## 重要原则:
+1. mermaid 代码使用 graph TB(自上而下)布局更清晰
+2. 突出标注公司涉足的环节(用 style 语句着色)
+3. segments 至少包含上游/中游/下游三层,按逻辑顺序排列
+4. 每个环节列出2-5个具体业务
+5. summary.covered_segments 精确列出公司实际覆盖的环节
+6. summary.full_label 控制在15字以内，精准概括公司产业链定位
+7. 输出纯JSON，不要用```json```包裹
+"""
+
+
+def analyze_industry_chain(
+    company_name: str,
+    company_code: str,
+    industry: str = "",
+    business_desc: str = "",
+    position: str = "",
+    position_detail: str = "",
+    materials: list[dict] | None = None,
+    *,
+    timeout: float = 45,
+    max_retries: int = 2,
+) -> dict:
+    """调用大模型分析公司在产业链中的完整位置
+
+    Args:
+        company_name: 公司名称
+        company_code: 股票代码
+        industry: 所属行业
+        business_desc: 主营业务描述
+        position: 已有的产业链位置(up/mid/down)
+        position_detail: 已有的细分环节描述
+        materials: 敏感品种列表
+        timeout: 单次 LLM 调用超时秒数
+        max_retries: 最大重试次数
+
+    Returns:
+        dict with keys: mermaid, segments, summary
+
+    Raises:
+        PortraitGenerationError: LLM 调用失败
+    """
+    if not settings.LLM_API_KEY:
+        logger.warning("LLM_API_KEY 未配置，跳过产业链分析")
+        return _fallback_chain_analysis(company_name, position, position_detail)
+
+    # 构建材料信息
+    materials_text = ""
+    if materials:
+        mat_names = [m.get("material_name", "") for m in materials if m.get("material_name")]
+        if mat_names:
+            materials_text = f"敏感原材料/品种: {', '.join(mat_names)}"
+
+    user_prompt = f"""请分析以下上市公司的产业链完整位置:
+
+公司名称: {company_name}
+股票代码: {company_code}
+所属行业: {industry or '未知'}
+产业链位置: {position or '未知'} ({position_detail or ''})
+主营业务: {business_desc or '未知'}
+{materials_text}
+
+请生成该公司在产业链中的全景位置分析，包括:
+1. Mermaid流程图(标注该公司涉足的环节)
+2. 各环节业务说明
+3. 产业链位置总结"""
+
+    client = _get_openai_client()
+    logger.info(f"调用 LLM 分析产业链: company={company_name}({company_code}), timeout={timeout}s")
+
+    last_error = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"产业链分析 LLM 调用尝试 {attempt}/{max_retries}")
+
+            response = client.chat.completions.create(
+                model=settings.LLM_MODEL,
+                messages=[
+                    {"role": "system", "content": CHAIN_ANALYSIS_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.3,
+                max_tokens=3000,
+                response_format={"type": "json_object"},
+                timeout=timeout,
+            )
+
+            raw_content = response.choices[0].message.content or ""
+            logger.info(f"产业链分析 LLM 原始响应(前300字符): {raw_content[:300]}")
+
+            json_text = _extract_json(raw_content)
+            result = json.loads(json_text)
+
+            # 验证必要字段
+            if "mermaid" not in result:
+                result["mermaid"] = ""
+            if "segments" not in result:
+                result["segments"] = []
+            if "summary" not in result:
+                result["summary"] = {
+                    "covered_segments": [],
+                    "core_segment": position_detail or position or "未分析",
+                    "full_label": position_detail or "",
+                    "analysis_text": "",
+                }
+
+            logger.info(
+                f"产业链分析成功: {company_name}, "
+                f"标签={result['summary'].get('full_label', '')}, "
+                f"环节数={len(result.get('segments', []))}"
+            )
+            return result
+
+        except json.JSONDecodeError as e:
+            last_error = e
+            logger.warning(f"产业链分析 尝试 {attempt}/{max_retries} JSON 解析失败: {e}")
+        except Exception as e:
+            last_error = e
+            logger.warning(f"产业链分析 尝试 {attempt}/{max_retries} 失败: {type(e).__name__}: {e}")
+
+        if attempt < max_retries:
+            wait = 2 ** attempt
+            logger.info(f"等待 {wait}s 后重试...")
+            time.sleep(wait)
+
+    raise PortraitGenerationError(
+        f"产业链分析失败（{max_retries} 次重试后仍失败）: "
+        f"{type(last_error).__name__}: {last_error}"
+    )
+
+
+def _fallback_chain_analysis(company_name: str, position: str, position_detail: str) -> dict:
+    """API Key 未配置时的占位分析"""
+    pos_label = {"up": "上游", "mid": "中游", "down": "下游"}.get(position, "")
+    return {
+        "mermaid": "",
+        "segments": [],
+        "summary": {
+            "covered_segments": [pos_label] if pos_label else [],
+            "core_segment": position_detail or "待AI分析",
+            "full_label": position_detail or "待AI分析",
+            "analysis_text": "LLM_API_KEY 未配置，无法生成产业链分析。请在 .env 中配置有效的 API Key 后重试。",
+        },
+    }
+
+
 def extract_financial_report(
     report_text: str,
     company_name: str,

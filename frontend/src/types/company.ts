@@ -26,6 +26,32 @@ export interface CompanyPortrait {
   materials: CompanyMaterial[]
 }
 
+// 产业链分析
+export interface ChainSegmentDetail {
+  business: string
+  description: string
+  company_involved: boolean
+}
+
+export interface ChainSegment {
+  level: 'upstream' | 'midstream' | 'downstream' | 'auxiliary'
+  label: string
+  details: ChainSegmentDetail[]
+}
+
+export interface ChainSummary {
+  covered_segments: string[]
+  core_segment: string
+  full_label: string
+  analysis_text: string
+}
+
+export interface ChainAnalysis {
+  mermaid: string
+  segments: ChainSegment[]
+  summary: ChainSummary
+}
+
 export interface CompanyDetail extends CompanyBasic {
   short_name: string
   business_desc: string
@@ -33,6 +59,7 @@ export interface CompanyDetail extends CompanyBasic {
   financial_summary?: FinancialSummary
   portrait_generated: boolean
   portrait_updated_at?: string
+  chain_analysis?: ChainAnalysis | null
 }
 
 export interface FinancialSummary {
@@ -132,6 +159,8 @@ export interface StockInfo {
   industry: string
   total_shares: number | null
   circulating_shares: number | null
+  pe: number | null   // 市盈率(动态)
+  pb: number | null   // 市净率
 }
 
 // API 响应包装

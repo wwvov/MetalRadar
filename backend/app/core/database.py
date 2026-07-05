@@ -35,5 +35,32 @@ def get_db():
 
 
 def init_db():
-    """初始化数据库：创建所有表"""
+    """初始化数据库：创建所有表 + 执行轻量迁移"""
     Base.metadata.create_all(bind=engine)
+
+    # 轻量迁移：为 SQLite 已有表添加新列（SQLAlchemy create_all 不会自动修改已有表）
+    if "sqlite" in settings.DATABASE_URL:
+        _migrate_sqlite()
+
+
+def _migrate_sqlite():
+    """SQLite 增量迁移 — 仅添加缺失的列，不破坏已有数据"""
+    import sqlite3
+    db_path = settings.DATABASE_URL.replace("sqlite:///", "")
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        # 获取 companies 表已有列
+        cursor.execute("PRAGMA table_info(companies)")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+
+        # chain_analysis 列迁移
+        if "chain_analysis" not in existing_cols:
+            cursor.execute("ALTER TABLE companies ADD COLUMN chain_analysis JSON")
+            print("[migrate] companies.chain_analysis 列已添加")
+
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[migrate] SQLite 迁移跳过: {e}")

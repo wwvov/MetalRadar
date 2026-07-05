@@ -80,6 +80,16 @@ def get_news_list(
 
         return _execute_query(db, query, user_id, page, page_size, skip_source_exclusion=True)
 
+    if tab == "favorites":
+        # 收藏夹：直接查 UserFavorite 获取全部收藏新闻 ID，不过滤来源
+        fav_rows = db.query(UserFavorite).filter(UserFavorite.user_id == user_id).all()
+        fav_news_ids = [row.news_id for row in fav_rows]
+        if not fav_news_ids:
+            return NewsListResponse(news=[], total=0)
+        query = query.filter(News.id.in_(fav_news_ids))
+        # 大 page_size 确保全部返回（收藏夹通常不会超过100条）
+        return _execute_query(db, query, user_id, page, max(page_size, 100), skip_source_exclusion=True)
+
     # ===== 主聚合流 Tab =====
     if tab == "followed_companies":
         followed_codes = _get_followed_codes(db, user_id)

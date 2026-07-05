@@ -24,7 +24,7 @@ export interface NewsListResponse {
   total: number
 }
 
-export type NewsTab = 'all' | 'followed_companies' | 'sensitive_metals' | 'macro' | 'macro_panel' | 'shmet_block'
+export type NewsTab = 'all' | 'followed_companies' | 'sensitive_metals' | 'macro' | 'macro_panel' | 'shmet_block' | 'favorites'
 
 export interface NewsFilters {
   company?: string

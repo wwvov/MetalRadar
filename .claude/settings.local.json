@@ -45,7 +45,9 @@
       "Bash(node /d/MetalRadar/frontend/node_modules/vite/bin/vite.js build --outDir /d/MetalRadar/frontend/dist)",
       "Bash(cat backend/.env)",
       "Bash(grep -r \"port\\\\|PORT\\\\|uvicorn\" backend/app/main.py)",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Bash(git *)",
+      "Bash(node -e \"try { require.resolve\\('mermaid'\\); console.log\\('mermaid installed'\\); } catch\\(e\\) { console.log\\('mermaid not installed'\\); }\")"
     ]
   }
 }
