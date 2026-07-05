@@ -110,6 +110,67 @@
 
 ---
 
+### 财报数据提取 ✅（已实现）
+
+用户上传财报PDF → 后端调用大模型提取财务指标，存入 `financial_reports` 表（`extraction_source='report_ai'`）。
+
+#### System Prompt 核心要点（`FINANCIAL_SYSTEM_PROMPT`）
+
+LLM 扮演中国注册会计师，从 PDF 文本中提取**扁平 JSON**：
+
+```json
+{
+  "report_period": "2025Q4",
+  "revenue": 423701834000.0,
+  "cost": 354890000000.0,
+  "net_profit": 52000000000.0,
+  "gross_margin": 16.2,
+  "direct_material_pct": null,
+  "direct_labor_pct": null,
+  "manufacturing_pct": null,
+  "raw_data": {}
+}
+```
+
+#### 提取规则
+
+| 字段 | 优先级/来源 | 注意事项 |
+|------|-----------|---------|
+| `report_period` | 报告期/会计期间 | 格式 YYYYQN 或 YYYYHN |
+| `revenue` | 合并利润表「营业收入」「营业总收入」 | 必填，通常最容易找到 |
+| `cost` | 「营业成本」>「主营业务成本」>「营业总成本」 | **需区分营业成本与营业总成本**，后者含期间费用 |
+| `net_profit` | 「净利润」「归属于母公司股东的净利润」 | 取合并净利润（含少数股东） |
+| `gross_margin` | 报表直接给出 > 自行计算 `(revenue-cost)/revenue` | 保留1位小数 |
+| `direct_material_pct` | 「营业成本构成」章节 | A股中经常缺失 → null |
+| `direct_labor_pct` | 同上 | 同上 |
+| `manufacturing_pct` | 同上 | 同上 |
+| `raw_data` | 额外信息（供应商集中度/研发费用等），含 `net_profit` | 无则 `{}` |
+
+#### 关键约束
+
+1. **单位统一为元**：万元 × 10,000，亿元 × 100,000,000
+2. **合并报表优先**于母公司报表
+3. 只提取明确出现的数据，不确定的填 null，不编造
+4. `temperature=0.1`, `max_tokens=1500`, `response_format=json_object`
+5. 最多 2 次指数退避重试（2s→4s），超时 60s
+6. 失败时抛出 `FinancialExtractionError`，但不阻塞画像生成（两个流程独立 try/except）
+7. `net_profit` 同时写入 `raw_data.net_profit` 以供 `get_aggregated_financials` 读取
+
+#### 数据优先级（`get_aggregated_financials`）
+
+查询财务数据时的合并策略：
+
+```
+user_edit（用户修正）→ 东方财富 API（akshare）→ report_ai（LLM 兜底）
+```
+
+- API 数据完整时直接返回，仅缺 `cost`/`gross_margin` 时才从 AI 报告补充
+- 季度趋势 `quarters[]` 始终从 API 获取（按报告期缓存，跨公司共享）
+- `net_margin = net_profit / revenue × 100`，由后端自动计算
+- API 完全不可用时才回退到 LLM 提取数据
+
+---
+
 ## AI Agent 对话 📋（Sprint 3 — 待实现）
 
 ### Agent 工具函数（计划）
