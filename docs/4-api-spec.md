@@ -5,9 +5,66 @@ Base URL: `/api`
 ## 数据动态性声明
 所有字段值均来自运行时数据库或外部接口，无固定值。以下 JSON 仅展示结构，非真实数据。
 
+## 状态说明
+- ✅ 已实现
+- 🔧 部分实现
+- 📋 计划中（Sprint 2/3）
+
 ---
 
-## 公司相关
+## 新闻相关 ✅
+
+### 前端调用接口
+- `GET /news?tab=all|followed_companies|sensitive_metals|macro|macro_panel|shmet_block&company=&metal=&companies=&metals=&metal_category=&source=&page=`
+  → `{ news: NewsItem[], total }`
+
+  后端从多个新闻源聚合，经实体识别、去重、LLM分类后统一返回。
+
+  **Tab 说明:**
+  | Tab | 说明 |
+  |-----|------|
+  | `all` | 全量新闻（排除上海金属网，该源走专属区块） |
+  | `followed_companies` | 仅包含用户关注公司的新闻（按 company_entities 匹配，同时支持代码+名称兜底） |
+  | `sensitive_metals` | 仅包含用户关注公司所用原材料的品种新闻 |
+  | `macro` | 纯宏观/政策类（关联度 gray，排除上海金属网） |
+  | `macro_panel` | 宏观快讯面板（无公司+无金属实体的纯宏观新闻，最多15条） |
+  | `shmet_block` | 上海金属网专属区块（可按 metal_category=贵金属\|小金属 筛选） |
+
+- `POST /news/{id}/favorite` body: `{ linked_company_id? }`
+- `POST /news/{id}/read`
+- `POST /news/read-all` body: `{ news_ids: string[] }` — 批量标记已读
+
+### 新闻管理接口
+- `POST /news/fetch?force=false` — 手动触发多源新闻抓取（3源聚合 + 去重 + 入库）
+- `POST /news/classify?limit=50` — 使用 LLM 对未分类新闻进行智能标注（最多100条/次）
+- `POST /news/refresh` — 完整刷新管道（后台异步）：抓取 → 入库 → LLM 分类
+- `GET /news/refresh/status` — 查询刷新任务状态
+
+### 后端新闻源（实际已接入）
+| 来源 | 底层接口 | 说明 | 对应Tab |
+|------|---------|------|---------|
+| 上海金属网-快讯 | `ak.futures_news_shmet(symbol)` | 遍历所有金属品种（铜/铝/铅/锌/镍/锡/贵金属/小金属）抓取。返回时间、内容。 | 敏感品种 |
+| 东方财富-全球快讯 | `ak.stock_info_global_em()` | 单次返回最近200条全球财经快讯。 | 宏观政策/全部 |
+| 新浪财经-全球快讯 | `ak.stock_info_global_sina()` | 单次返回最近20条快讯。 | 宏观政策 |
+
+### 新闻源（Sprint 3 计划扩展）
+| 来源 | 底层接口 | 说明 |
+|------|---------|------|
+| 东方财富-个股新闻 | `ak.stock_news_em(symbol)` | 仅对已关注公司拉取，每个公司每天最多1次 |
+| 财联社-电报 | `ak.stock_info_global_cls(symbol)` | 可选 "全部" 或 "重点" |
+
+### 新闻拉取与反爬策略
+- **全量拉取**：用户手动触发 `/news/refresh` 时遍历所有必要 symbol 抓取，结果统一做实体识别、去重、情绪分析后存入数据库。
+- **频率控制**：
+  - 同一数据源两次请求间隔不低于 **5 秒**（`SCRAPE_COOLDOWN = 5`）。
+  - 个股新闻接口 `stock_news_em` 仅对已关注公司拉取，每个公司每天最多拉取一次。
+  - 同花顺相关接口必须遵守 **单次调用 + 缓存** 原则，严禁高频轮询。
+- **缓存策略**：所有拉取结果以 JSON 文件缓存（`.cache/` 目录），新闻类 TTL=300s（5分钟），公司信息类 TTL=86400s（1天）。
+- **前端调用**：前端仅调用统一的 `/api/news` 聚合接口，不直接接触第三方源。
+
+---
+
+## 公司相关 ✅
 
 ### 前端调用接口
 - `GET /companies/search?keyword=xxx`
@@ -15,10 +72,20 @@ Base URL: `/api`
 
 - `GET /companies/{id}`
   → 公司基本信息 + portrait（position, materials 列表）
+  若画像数据无效（portrait_generated=false），后端自动触发后台重新生成。
 
 - `POST /companies/init`
   multipart: `company_code`, `report_pdf`(可选)
   → 完整 portrait JSON（由大模型生成）
+
+- `GET /companies/with-materials`
+  → 获取所有已有画像材料的公司列表（用于仪表盘公司选择）
+
+- `PUT /companies/{id}/portrait`
+  → 手动编辑公司画像（position, position_detail, materials 等）
+
+- `POST /companies/{id}/regenerate`
+  → 强制重新生成公司 AI 画像
 
 ### 后端数据源（供后端实现参考）
 | 来源 | 底层接口 | 说明 |
@@ -30,55 +97,31 @@ Base URL: `/api`
 | 东方财富-利润表 | `ak.stock_lrb_em(date)` | 传入报告期，返回全市场公司的营业收入、营业成本、费用、利润等。 |
 | 东方财富-现金流量表 | `ak.stock_xjll_em(date)` | 传入报告期，返回全市场公司的经营性/投资性/融资性现金流净额及同比增长。 |
 
-## 新闻相关
+---
 
-### 前端调用接口
-- `GET /news?tab=all|followed_companies|sensitive_metals|macro&company=&metal=&page=`
-  → `{ news: NewsItem[], total }`
-  后端从多个新闻源聚合，经实体识别、去重、关联度计算后统一返回。
+## 期货与仪表盘 ✅
 
-- `POST /news/{id}/favorite` body: `{ linked_company_id? }`
-- `POST /news/{id}/read`
+### 仪表盘接口
+- `GET /futures/dashboard/{company_id}`
+  → 按公司材料返回期货行情数据：实时报价、成本压力、价格分位、迷你K线
 
-### 后端新闻源（供后端实现参考）
-| 来源 | 底层接口 | 说明 | 对应Tab |
-|------|---------|------|---------|
-| 上海金属网-快讯 | `ak.futures_news_shmet(symbol)` | 遍历所有金属品种（铜/铝/铅/锌/镍/锡/贵金属/小金属）抓取。返回时间、内容。 | 敏感品种 |
-| 东方财富-个股新闻 | `ak.stock_news_em(symbol)` | 传入股票代码，单次返回最近100条个股相关新闻。 | 关注公司 |
-| 东方财富-财经早餐 | `ak.stock_info_cjzc_em()` | 返回全部历史财经早餐数据（标题、摘要、时间、链接）。 | 宏观政策 |
-| 东方财富-全球快讯 | `ak.stock_info_global_em()` | 单次返回最近200条全球财经快讯。 | 宏观政策/全部 |
-| 新浪财经-全球快讯 | `ak.stock_info_global_sina()` | 单次返回最近20条快讯。 | 宏观政策 |
-| 富途牛牛-快讯 | `ak.stock_info_global_futu()` | 单次返回最近50条快讯。 | 全部 |
-| 同花顺-全球直播 | `ak.stock_info_global_ths()` | 单次返回最近20条快讯。 | 全部/宏观政策 |
-| 财联社-电报 | `ak.stock_info_global_cls(symbol)` | symbol 可选 "全部" 或 "重点"，返回最近20条。 | 宏观政策/敏感品种 |
+- `GET /futures/overview?company_ids=xxx,yyy`
+  → 跨公司总览模式：多公司材料的价格变化汇总对比
 
-### 新闻拉取与反爬策略
-- **全量拉取**：后端定时（或用户手动刷新时）遍历所有必要 symbol 抓取上述接口，结果统一做实体识别、去重、情绪分析后存入数据库。
-- **频率控制**：
-  - 同一数据源两次请求间隔不得低于 **30 秒**。
-  - 个股新闻接口 `stock_news_em` 仅对已关注公司拉取，每个公司每天最多拉取一次。
-  - 同花顺相关接口（含主营介绍 `stock_zyjs_ths`）必须遵守 **单次调用 + 缓存** 原则，严禁高频轮询。
-- **缓存策略**：所有拉取结果在 Redis 中缓存 5 分钟（新闻类）到 1 天（公司信息类），减少对上游的直接调用。
-- **前端调用**：前端仅调用统一的 `/api/news` 聚合接口，不直接接触第三方源。
+- `GET /futures/prefetch`
+  → 预热期货缓存（应用启动时自动执行）
 
-## 行情与图表
-
-### 股票K线
-- `GET /stocks/{code}/kline?frequency=daily&from=&to=&adjustflag=2`
-  → `{ data: [{date, open, high, low, close, volume, amount, turn, pctChg, ...}] }`
-  数据源：BaoStock `query_history_k_data_plus`，默认前复权，频率支持 daily/weekly/monthly/5/15/30/60
-
-### 期货K线
+### 期货K线 📋
 - `GET /futures/{contract}/kline?period=daily&from=&to=`
   → `{ data: [{date, open, high, low, close, volume, hold}] }`
-  数据源：新浪财经 `ak.futures_zh_daily_sina(symbol)`。合约代码需转换为连续合约格式（品种代码+0，如 `RB0`、`LC0`），或指定月份合约。默认使用连续合约。
+  数据源：新浪财经 `ak.futures_zh_daily_sina(symbol)`。合约代码需转换为连续合约格式（品种代码+0，如 `RB0`、`LC0`）。
 
-### 期货实时行情
+### 期货实时行情 📋
 - `GET /futures/{contract}/quote`
   → `{ contract, price, change_pct, open, high, low, volume, open_interest, timestamp }`
-  数据源：新浪财经 `ak.futures_zh_realtime(symbol=品种中文名)`。后端需根据合约映射表，将合约代码转为品种中文名，获取行情后筛选对应连续合约或主力合约。
+  数据源：新浪财经 `ak.futures_zh_realtime(symbol=品种中文名)`。
 
-### 合约映射表（关键品种示例）
+### 合约映射表（关键品种）
 | 画像合约 | 品种中文名 | 连续合约代码 | 说明 |
 |---------|-----------|------------|------|
 | LC主力 | 碳酸锂 | LC0 | 广期所，连续合约 |
@@ -92,27 +135,39 @@ Base URL: `/api`
 | AG主力 | 白银 | AG0 | 上期所 |
 | 无期货品种 | 钴 / 稀土 | 退至现货 | 通过上海金属网快讯获取现货价 |
 
-### 波动率锥（后端计算）
-- `GET /futures/{contract}/volatility-cone`
-  → `{ periods, current_volatility, distribution }`
-  基于期货K线数据计算各期限（5/10/20/60/120日）的历史波动率分布及当前波动率。
+### 其他图表数据 📋（Sprint 2 待完成）
+- `GET /futures/{contract}/volatility-cone` — 波动率锥
+- `GET /futures/{contract}/price-percentile` — 价格分位图
+- `GET /companies/{id}/divergence?material=铜` — 价格背离分析
+- `GET /companies/{id}/cost-pressure` — 材料成本压力
 
-### 价格分位图（后端计算）
-- `GET /futures/{contract}/price-percentile`
-  → `{ current_price, year_high, year_low, percentile, base_price }`
-  基于期货K线数据计算近一年价格区间及当前价百分位。
+---
 
-### 价格背离分析（后端计算）
-- `GET /companies/{id}/divergence?material=铜`
-  → `{ correlation_series, events, analysis_text }`
-  后端使用股票K线和期货K线计算滚动相关系数，并由AI生成分析文本。
+## 股票K线 📋（Sprint 2 待完成）
 
-### 材料成本压力（后端计算）
-- `GET /companies/{id}/cost-pressure`
-  → `{ materials: [{ name, cost_pct, base_price, current_price, change_pct, pressure_level, estimated_margin_impact }] }`
-  基于期货实时价与财报基准价计算。
+- `GET /stocks/{code}/kline?frequency=daily&from=&to=&adjustflag=2`
+  → `{ data: [{date, open, high, low, close, volume, amount, turn, pctChg, ...}] }`
+  数据源：BaoStock `query_history_k_data_plus`，默认前复权。
 
-## AI Agent
+---
+
+## 用户管理 ✅
+
+- `GET /user/follows` → `{ companies: [...] }` 获取用户关注列表
+- `POST /user/follows` body: `{ company_id }` 添加关注公司
+- `DELETE /user/follows/{company_id}` 取消关注
+
+---
+
+## AI Agent 对话 📋（Sprint 3 待实现）
+
 - `POST /chat` body: `{ company_id, message, scenario? }`
   → `{ reply: string, chart?: { type, ... } }`
   chart 类型：line / bar / flow / gauge，具体字段见 ai-capabilities
+
+---
+
+## 开发/种子数据
+
+- `POST /seed/sprint1` — 导入 Sprint 1 开发种子数据（预配3家公司 + 30+条新闻）
+- `GET /health` — 健康检查

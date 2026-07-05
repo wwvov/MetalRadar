@@ -300,7 +300,7 @@ SVG 折线图（h-16）
 ### 1.10 Footer
 
 ```
-数据来源：东方财富 · 上海金属网 · 新浪财经 · 财联社 · 富途牛牛 · 同花顺 · 仅供研究参考，不构成投资建议
+数据来源：东方财富 · 上海金属网 · 新浪财经 · 仅供研究参考，不构成投资建议
 ```
 
 ---
@@ -406,17 +406,18 @@ SVG 折线图（h-16）
 
 ### 多源抓取 (news_fetcher.py)
 
-- **数据源**: akshare — 上海金属网 / 东方财富 / 新浪财经
+- **数据源**: akshare — 上海金属网 / 东方财富全球快讯 / 新浪财经全球快讯（3源）
 - **文件缓存**: `.cache/news_raw.json`，TTL 5 分钟
-- **反爬**: 5 秒冷却间隔
+- **反爬**: 5 秒冷却间隔（`SCRAPE_COOLDOWN = 5`）
 - **去重**: MD5 哈希增量入库
 - **API**: `POST /api/news/fetch` (force 参数强制刷新)
 
 ### LLM 智能分类 (news_classifier.py)
 
 - **模型**: DeepSeek，批量处理 15 条/批
-- **识别维度**: 34 种金属品种、10 种事件类型、情绪判断（利多/利空）
+- **识别维度**: 34 种金属品种、10 种事件类型、情绪判断（利多/利空/中性）
 - **关联度**: 红/蓝/黄/灰四级
+- **公司实体格式**: 统一使用 6 位数字股票代码（如 "601899"），`followed_companies` 查询同时支持名称兜底匹配
 - **一致性约束**: `metal_entities` + `company_entities` 双空时 → `is_relevant=false`, `relevance_level=gray`
 - **API**: `POST /api/news/classify` (limit 参数控制处理条数)
 
@@ -426,10 +427,10 @@ SVG 折线图（h-16）
 - **状态查询**: `GET /api/news/refresh/status`
 - **前端**: `useNewsRefresh` hook，2s 轮询进度，完成自动 refetch 新闻列表
 
-### 新闻数据库 (276 条+)
+### 新闻数据库
 
-- **种子数据**: `POST /api/seed/sprint1` — 46 条覆盖 30+ 金属品种
-- **akshare 源**: 230 条+ 多源新闻
+- **种子数据**: `POST /api/seed/sprint1` — 3家预配置公司 + 30+条覆盖新闻
+- **akshare 源**: 实时抓取补充
 - **SQLite**: WAL 模式 + `busy_timeout=5000` 防并发锁库
 
 ---

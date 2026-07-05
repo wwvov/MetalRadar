@@ -66,7 +66,7 @@ CLASSIFY_SYSTEM_PROMPT = """你是一位资深的中国金属/大宗商品行业
    - 产业类：不涉及上述品种清单的行业新闻
 2. **metal_entities**: 从新闻中提取涉及的金属品种名称（必须是上述清单中的品种，不要编造）。无则空数组。
    **关键约束**: 如果 metal_entities 为空数组，则 is_relevant 必须为 false，relevance_level 必须为 "gray"。
-3. **company_entities**: 提取新闻中明确提到的A股上市公司名称。无则空数组。
+3. **company_entities**: 提取新闻中明确提到的A股上市公司股票代码（6位数字，如"601899"）。无则空数组。注意：只输出6位数字代码，不要输出公司名称。
 4. **relevance_level**:
    - "red" = 同时涉及金属品种+具体公司（metal_entities 和 company_entities 都非空）
    - "yellow" = 仅涉及金属品种（metal_entities 非空，company_entities 为空）
@@ -88,7 +88,7 @@ CLASSIFY_SYSTEM_PROMPT = """你是一位资深的中国金属/大宗商品行业
       "index": 0,
       "is_relevant": true,
       "metal_entities": ["铜", "黄金"],
-      "company_entities": ["紫金矿业"],
+      "company_entities": ["601899"],
       "relevance_level": "red",
       "emotion": "positive",
       "event_type": "price_surge",

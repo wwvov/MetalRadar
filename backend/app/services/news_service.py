@@ -3,7 +3,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, func
 from app.models.news import News
-from app.models.company import CompanyMaterial
+from app.models.company import Company, CompanyMaterial
 from app.models.user import UserFollow, UserFavorite, UserRead
 from app.schemas.news import NewsItem, NewsListResponse
 
@@ -85,7 +85,15 @@ def get_news_list(
         followed_codes = _get_followed_codes(db, user_id)
         if not followed_codes:
             return NewsListResponse(news=[], total=0)
+        # 同时用股票代码和公司名称匹配（LLM 输出格式可能不一致）
         conditions = [News.company_entities.contains([code]) for code in followed_codes]
+        # 查询关注公司的名称，加入名称兜底匹配
+        followed_names = [
+            name for (name,) in db.query(Company.name)
+            .filter(Company.id.in_(followed_codes))
+            .all()
+        ]
+        conditions += [News.company_entities.contains([name]) for name in followed_names]
         query = query.filter(or_(*conditions))
 
     elif tab == "sensitive_metals":
@@ -157,6 +165,14 @@ def _execute_query(
     )
 
     followed_codes = _get_followed_codes(db, user_id)
+    # 预计算关注公司的名称集合（用于名-码兜底匹配）
+    followed_names: set[str] = set()
+    if followed_codes:
+        followed_names = {
+            name for (name,) in db.query(Company.name)
+            .filter(Company.id.in_(followed_codes))
+            .all()
+        }
     favorites = {
         f.news_id: f.linked_company_id
         for f in db.query(UserFavorite)
@@ -173,7 +189,7 @@ def _execute_query(
     items = []
     for n in news_list:
         item = NewsItem.model_validate(n)
-        item.relevance_level = _calc_relevance(n, followed_codes)
+        item.relevance_level = _calc_relevance(n, followed_codes, followed_names)
         if n.id in favorites:
             item.is_favorited = True
             item.linked_company_id = favorites[n.id]
@@ -190,12 +206,16 @@ def _get_followed_codes(db: Session, user_id: str) -> list[str]:
     ]
 
 
-def _calc_relevance(news: News, followed_codes: list[str]) -> str:
+def _calc_relevance(news: News, followed_codes: list[str], followed_names: set[str] | None = None) -> str:
     """关联度：红(公司+金属) > 蓝(公司) > 黄(金属) > 灰(无关)"""
     companies = news.company_entities or []
     metals = news.metal_entities or []
 
+    # 同时匹配股票代码和公司名称（LLM 输出格式可能不一致）
     has_followed_company = any(c in followed_codes for c in companies)
+    if not has_followed_company and followed_names:
+        has_followed_company = any(c in followed_names for c in companies)
+
     has_metal = len(metals) > 0
 
     if has_followed_company and has_metal:

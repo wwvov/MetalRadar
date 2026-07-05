@@ -1,4 +1,6 @@
-# 数据库核心表结构 (PostgreSQL)
+# 数据库核心表结构 (SQLite)
+
+> **环境说明**: 开发环境使用 SQLite 3（WAL模式），生产环境可切换 PostgreSQL。所有 JSON 字段以 TEXT 类型存储，通过 SQLAlchemy JSON 类型自动序列化/反序列化。
 
 ## 数据动态性声明
 
@@ -22,6 +24,8 @@ AI 在生成数据库操作代码时，必须将每个字段的值视为**从运
 | business_desc | TEXT | 主营业务描述，从数据接口或 AI 提取生成 |
 | position | VARCHAR(20) | 由大模型根据主营业务和财报分析后动态输出，可能为 'up', 'mid', 'down' 之一，但值由 AI 决定 |
 | position_detail | VARCHAR(100) | 由大模型动态生成的细分环节描述，如"锂矿采选""电池制造" |
+| portrait_generated | BOOLEAN | 系统自动设置：画像数据完整时为 true，占位数据时为 false |
+| portrait_updated_at | TIMESTAMP | 画像最后生成/更新时间为系统当前时间 |
 
 ## company_materials
 | 字段 | 类型 | 动态属性 |
@@ -33,6 +37,7 @@ AI 在生成数据库操作代码时，必须将每个字段的值视为**从运
 | source | VARCHAR(20) | 数据来源，由大模型标注：'report'（财报直接披露）或 'inferred'（行业推断） |
 | direction | VARCHAR(10) | 影响方向，由大模型根据产业链位置判断：'negative'（成本上升不利）或 'positive'（产品涨价有利） |
 | contract | VARCHAR(20) | 对应的期货合约代码，由系统根据 material_name 在合约映射表中查找得到 |
+| base_price | DECIMAL(15,4) | 基准价格（用于成本压力计算），取自财报报告期对应的期货均价，由系统自动计算 |
 
 ## news
 | 字段 | 类型 | 动态属性 |
@@ -43,11 +48,12 @@ AI 在生成数据库操作代码时，必须将每个字段的值视为**从运
 | source | VARCHAR(50) | 记录该新闻的抓取来源（东方财富、新浪、上海金属网等），非枚举 |
 | pub_time | TIMESTAMP | 新闻发布时间，取自原始数据 |
 | tags | JSON | 由新闻实体识别AI处理文本后动态生成的标签数组。包含该公司名、金属品种名、事件类型短语。每条新闻的标签完全取决于其内容和AI分析结果 |
-| company_entities | JSON | 由新闻实体识别AI从新闻中提取的A股公司股票代码数组。内容取决于新闻实际提及的公司 |
-| metal_entities | JSON | 由新闻实体识别AI提取的金属品种数组，仅限白名单品种，但具体出现哪些品种由新闻内容决定 |
-| relevance_level | VARCHAR(10) | 由系统根据当前登录用户的关注列表实时计算。可能为 'red','yellow','blue','gray'，但具体值每次计算得出，不固定 |
-| emotion | VARCHAR(10) | 由大模型对每条新闻做情绪分析后输出的标签，值为 'positive','negative','neutral' 之一，但每条新闻独立判断 |
-| is_relevant | BOOLEAN | 由新闻实体识别AI判断该新闻是否与商品市场相关，若是则为 true，否则 false |
+| company_entities | JSON | 由新闻分类AI提取的A股公司6位数字股票代码数组（如 ["601899"]）。注意：统一使用代码格式，非公司名称。内容取决于新闻实际提及的公司 |
+| metal_entities | JSON | 由新闻分类AI提取的金属品种数组，仅限白名单品种，但具体出现哪些品种由新闻内容决定 |
+| relevance_level | VARCHAR(10) | 由新闻分类AI标注的关联等级。可能为 'red','yellow','blue','gray'，但值由AI根据实体内容判断 |
+| emotion | VARCHAR(10) | 由新闻分类AI对每条新闻做情绪分析后输出的标签，值为 'positive','negative','neutral' 之一，但每条新闻独立判断 |
+| is_relevant | BOOLEAN | 由新闻分类AI判断该新闻是否与商品市场相关，若是则为 true，否则 false |
+| event_type | VARCHAR(30) | 由新闻分类AI选择的事件类型（10类之一）：supply_disruption, price_surge, price_drop, policy_favorable, monetary_policy, macro_economy, industry_trend, demand_change, inventory_change, geopolitical。空字符串表示未分类 |
 | raw_url | VARCHAR(500) | 新闻原文链接，来自数据源 |
 
 ## user_favorites
@@ -63,6 +69,13 @@ AI 在生成数据库操作代码时，必须将每个字段的值视为**从运
 |------|------|----------|
 | user_id | VARCHAR(50) | 用户标识 |
 | company_id | VARCHAR(20) | 被关注的公司的股票代码 |
+
+## user_reads
+| 字段 | 类型 | 动态属性 |
+|------|------|----------|
+| id | SERIAL PK | 自增主键 |
+| user_id | VARCHAR(50) | 用户标识 |
+| news_id | VARCHAR(50) FK | 被标记为已读的新闻ID |
 
 ## financial_reports
 | 字段 | 类型 | 动态属性 |
