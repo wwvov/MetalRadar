@@ -8,6 +8,8 @@ export const CHART_COLORS = {
   blue: '#3b82f6',
   yellow: '#eab308',
   gray: '#6b7280',
+  primary: '#7c3aed',    // 紫色主色 (Agent)
+  green: '#16a34a',      // 翠绿
 }
 
 export const BASE_CHART_OPTION: Partial<EChartsOption> = {
