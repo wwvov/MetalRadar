@@ -41,7 +41,8 @@ frontend/src/
 │   ├── HomePage.tsx        # 首页：新闻聚合+仪表盘
 │   ├── WatchlistPage.tsx   # 我的关注：公司管理+画像
 │   ├── CompanyPage.tsx     # 公司详情（财务指标/市值走势/成本压力）
-│   └── AgentPage.tsx       # AI Agent（Sprint 3 待实现）
+│   ├── AgentPage.tsx           # AI Agent（Sprint 3 待实现）
+│   └── KnowledgeGraphPage.tsx  # 知识图谱（占位页面，功能预告）
 ├── components/
 │   ├── ui/                 # shadcn/ui 组件 (Button, Card, Tabs, Dialog, Drawer, Badge, Skeleton, Tooltip, Slider 等)
 │   ├── news/               # NewsCard, NewsSkeleton, MacroPanel, MacroTicker, ShmetBlock, MetalPriceDashboard, FavoritePopover, EmptyGuide, ErrorCard
@@ -84,10 +85,10 @@ backend/
 │   │   ├── news_classifier.py # LLM 新闻批量分类 (事件/情绪/实体)
 │   │   ├── news_service.py    # 新闻查询/过滤/关联度计算/收藏
 │   │   ├── company_service.py # 公司搜索/画像生成/材料管理/财务数据聚合/产业链分析
-│   │   ├── stock_service.py   # 股票K线/公司信息(PE/PB/市值)/财务数据/反爬控制
-│   │   ├── futures_service.py # 期货K线/报价/分位/波动率锥
+│   │   ├── stock_service.py   # 股票K线/公司信息(PE/PB/市值)/多源容错(东财→新浪回退)/反爬检测
+│   │   ├── futures_service.py # 期货K线/报价/分位/多源回退(新浪→futures_main_sina)/列名安全解析
 │   │   ├── llm_service.py     # LLM 调用封装 (画像生成/财报提取/产业链分析)
-│   │   └── _scrape_control.py # 反爬控制 (冷却/重试/锁)
+│   │   └── _scrape_control.py # 自适应反爬控制 (指数退避冷却/数据源故障跟踪/自动恢复)
 │   └── core/
 │       ├── config.py       # 配置管理 (Settings, 从 .env 加载)
 │       └── database.py     # 数据库引擎 + 会话工厂 + SQLite 迁移
@@ -99,3 +100,10 @@ backend/
 - 所有接口定义对齐 `api-spec.md`，字段名严格一致。
 - 后端 API 层仅做参数校验和路由，业务逻辑在 services 层。
 - `.env` 文件已被 gitignore 保护，API 密钥不得提交到仓库。
+
+## 缓存与刷新机制
+- **动态缓存 TTL**：交易时段 spot=60s/kline=15min/info=5min，非交易时段 spot=5min/kline=1h/info=1h。
+- **后台守护线程**：交易时段每 5min 检查缓存过期并刷新，非交易时段每 30min。
+- **原子缓存更新**：失败保留旧缓存，不主动 invalidate，单次尝试不重试（避免触发反爬）。
+- **启动优化**：不再一次性预热全部期货，避免突发请求触发反爬封禁。
+- **东财封禁检测**：后台刷新检测东财源故障时自动降频（退避倍数增长），成功后自动恢复。

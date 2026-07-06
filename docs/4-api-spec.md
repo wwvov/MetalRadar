@@ -58,6 +58,9 @@ Base URL: `/api`
 - **全量拉取**：用户手动触发 `/news/refresh` 时遍历所有必要 symbol 抓取，结果统一做实体识别、去重、情绪分析后存入数据库。
 - **频率控制**：
   - 同一数据源两次请求间隔不低于 **5 秒**（`SCRAPE_COOLDOWN = 5`）。
+  - **自适应冷却**：连续失败时冷却时间指数增长（2s → 4s → 8s → ... → 120s 上限），成功后自动重置。
+  - **数据源故障跟踪**：东财源连续失败 5 次自动跳过 10 分钟，10 次跳过 30 分钟；成功后自动恢复。
+  - **空值缓存保护**：数据源失败时不再将 null 写入缓存，保留旧数据兜底。
   - 财务数据连续 API 调用间隔随机 **0.3~1.0 秒**，仅在实际发起网络请求时生效（命中缓存则跳过）。
   - 个股新闻接口 `stock_news_em` 仅对已关注公司拉取，每个公司每天最多拉取一次。
   - 同花顺相关接口必须遵守 **单次调用 + 缓存** 原则，严禁高频轮询。
@@ -115,27 +118,57 @@ Base URL: `/api`
 
 ---
 
+## 行情市场状态 ✅
+
+- `GET /api/market/status`
+  → 返回行情数据新鲜度与数据源状态：
+  ```json
+  {
+    "ok": true,
+    "data": {
+      "spot_market_last_refresh": "2026-07-06T12:05:00",
+      "futures_last_refresh": "2026-07-06T12:05:58",
+      "trading_hours": true,
+      "data_source_status": {
+        "eastmoney_blocked": false,
+        "consecutive_failures": 0,
+        "source_details": {
+          "eastmoney": {"failures": 0, "skip_until": null}
+        }
+      }
+    }
+  }
+  ```
+  - `trading_hours`: 当前是否交易时段
+  - `data_source_status.eastmoney_blocked`: 东财源是否被自动跳过
+  - `source_details`: 各数据源故障跟踪（连续失败次数、跳过截止时间）
+
+- `POST /api/market/refresh`
+  → 手动触发行情数据刷新（交易时段内有效，后端去重防并发）
+
+---
+
 ## 期货与仪表盘 ✅
 
 ### 仪表盘接口
 - `GET /futures/dashboard/{company_id}`
-  → 按公司材料返回期货行情数据：实时报价、成本压力、价格分位、迷你K线
+  → 按公司材料返回期货行情数据：实时报价、成本压力（加权影响计算）、价格分位（过去365/730天）、迷你K线、**2026年以来涨跌幅(YTD)**
 
 - `GET /futures/overview?company_ids=xxx,yyy`
-  → 跨公司总览模式：多公司材料的价格变化汇总对比
+  → 跨公司总览模式：多公司材料的价格变化汇总对比（含YTD）
 
 - `GET /futures/prefetch`
-  → 预热期货缓存（应用启动时自动执行）
+  → 预热期货缓存（按需，不再一次性全量预热避免触发反爬）
 
 ### 期货K线 ✅
 - `GET /futures/{contract}/kline?period=daily&from=&to=`
   → `{ data: [{date, open, high, low, close, volume, hold}] }`
-  数据源：新浪财经 `ak.futures_zh_daily_sina(symbol)`。合约代码需转换为连续合约格式（品种代码+0，如 `RB0`、`LC0`）。
+  数据源：新浪财经 `ak.futures_zh_daily_sina(symbol)`（英文列名），回退 `futures_main_sina`。合约代码需转换为连续合约格式（品种代码+0，如 `RB0`、`LC0`）。K线日期过滤格式统一为 YYYYMMDD。
 
 ### 期货实时行情 ✅
 - `GET /futures/{contract}/quote`
   → `{ contract, price, change_pct, open, high, low, volume, open_interest, timestamp }`
-  数据源：新浪财经 `ak.futures_zh_realtime(symbol=品种中文名)`。
+  数据源：新浪财经 `ak.futures_zh_realtime(symbol=品种中文名)`，`_safe_col` 列名安全解析。
 
 ### 合约映射表（关键品种）
 | 画像合约 | 品种中文名 | 连续合约代码 | 说明 |
@@ -164,10 +197,12 @@ Base URL: `/api`
 - `GET /stocks/{code}/kline?frequency=daily&from=&to=&adjust=`
   → `{ data: [{date, open, high, low, close, volume, amount, turn, pctChg, ...}] }`
   数据源：新浪财经 `stock_zh_a_daily` → 东财 `stock_zh_a_hist` 兜底，默认前复权。
+  日期过滤格式统一为 YYYYMMDD，东财失败时不再将 null 写入缓存。
 
 - `GET /stocks/{code}/info`
   → `{ data: {code, total_market_cap, circulating_market_cap, industry, total_shares, circulating_shares, pe, pb} }`
   数据源：东财全市场行情 `stock_zh_a_spot_em`（PE/PB/市值），`stock_individual_info_em` 兜底。
+  增加东财源封禁检测，被封时跳过以避免无效请求。
 
 ---
 

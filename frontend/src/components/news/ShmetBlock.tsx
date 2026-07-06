@@ -49,16 +49,16 @@ export function ShmetBlock() {
   }
 
   return (
-    <Card className="border-green-200 shadow-sm">
+    <Card className="border-green-200 shadow-sm flex flex-col [contain:layout_size]">
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-base text-green-900">
           <Factory className="w-5 h-5 text-green-700" />
           上海金属网 · 产业快讯
         </CardTitle>
       </CardHeader>
-      <CardContent className="pt-0">
-        <Tabs value={metalTab} onValueChange={setMetalTab} className="flex-col">
-          <TabsList className="w-full justify-start overflow-x-auto bg-green-50/50 p-1 rounded-lg">
+      <CardContent className="pt-0 flex-1 flex flex-col min-h-0">
+        <Tabs value={metalTab} onValueChange={setMetalTab} className="flex flex-col flex-1 min-h-0">
+          <TabsList className="w-full justify-start overflow-x-auto bg-green-50/50 p-1 rounded-lg shrink-0">
             {SHMET_TABS.map((tab) => (
               <TabsTrigger
                 key={tab.value}
@@ -70,7 +70,7 @@ export function ShmetBlock() {
             ))}
           </TabsList>
 
-          <TabsContent value={metalTab} className="mt-3">
+          <TabsContent value={metalTab} className="mt-3 flex-1 min-h-0 flex flex-col">
             {query.isLoading ? (
               <NewsSkeleton />
             ) : query.isError ? (
@@ -80,7 +80,7 @@ export function ShmetBlock() {
                 暂无{metalTab || '要闻'}相关新闻
               </p>
             ) : (
-              <div className="space-y-2.5 max-h-[400px] overflow-y-auto pr-1">
+              <div className="space-y-2.5 overflow-y-auto pr-1 flex-1 min-h-0">
                 {query.data.news.map((item) => (
                   <NewsCard
                     key={item.id}
