@@ -186,7 +186,7 @@ function SessionSidebar({
       <div className="px-3 py-3 border-b border-slate-100 flex items-center justify-between">
         <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">历史会话</span>
         <div className="flex items-center gap-1">
-          <button onClick={onCreate} className="p-1.5 rounded-lg hover:bg-purple-50 text-purple-600" title="新建会话">
+          <button onClick={onCreate} className="p-1.5 rounded-lg hover:bg-green-50 text-green-800" title="新建会话">
             <Plus className="w-4 h-4" />
           </button>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 md:hidden">
@@ -203,7 +203,7 @@ function SessionSidebar({
               onClick={() => onSelect(s.id)}
               className={cn(
                 'group mx-2 my-0.5 px-3 py-2.5 rounded-lg cursor-pointer transition-colors',
-                s.id === activeId ? 'bg-purple-50 border border-purple-200' : 'hover:bg-slate-50 border border-transparent'
+                s.id === activeId ? 'bg-green-50 border border-green-200' : 'hover:bg-slate-50 border border-transparent'
               )}
             >
               {editingId === s.id ? (
@@ -213,7 +213,7 @@ function SessionSidebar({
                   onChange={e => setEditTitle(e.target.value)}
                   onBlur={() => { onRename(s.id, editTitle); setEditingId(null) }}
                   onKeyDown={e => { if (e.key === 'Enter') { onRename(s.id, editTitle); setEditingId(null) } }}
-                  className="w-full text-sm bg-white border border-purple-200 rounded px-2 py-1 focus:outline-none"
+                  className="w-full text-sm bg-white border border-green-200 rounded px-2 py-1 focus:outline-none"
                   onClick={e => e.stopPropagation()}
                 />
               ) : (
@@ -257,11 +257,11 @@ function DashboardPanel({
   ]
 
   return (
-    <div className={cn('w-[300px] shrink-0 h-full bg-white border-l border-slate-200 flex flex-col overflow-auto', className)}>
+    <div className={cn('w-[300px] shrink-0 self-stretch bg-white border-l border-slate-200 flex flex-col overflow-hidden', className)}>
       {/* Company selector */}
       <div className="px-3 py-3 border-b border-slate-100">
         <select value={companyId} onChange={e => onCompanyChange(e.target.value)}
-          className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-500/30">
+          className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-green-500/30">
           <option value="">选择公司...</option>
           {follows.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
         </select>
@@ -272,7 +272,7 @@ function DashboardPanel({
         {tabs.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             className={cn('flex-1 flex items-center justify-center gap-1 py-2 text-xs font-medium border-b-2 transition-colors',
-              tab === t.key ? 'border-purple-600 text-purple-700' : 'border-transparent text-slate-500 hover:text-slate-700')}>
+              tab === t.key ? 'border-green-800 text-green-900' : 'border-transparent text-slate-500 hover:text-slate-700')}>
             <t.icon className="w-3.5 h-3.5" />{t.label}
           </button>
         ))}
@@ -300,8 +300,8 @@ function DashboardPanel({
           <div className="space-y-1.5">
             {recommended.questions.map((q, i) => (
               <button key={i}
-                className="w-full text-left text-xs text-slate-600 hover:text-purple-700 hover:bg-purple-50 rounded-lg px-2 py-1.5 transition-colors flex items-start gap-1.5">
-                <ChevronRight className="w-3 h-3 mt-0.5 shrink-0 text-purple-400" />
+                className="w-full text-left text-xs text-slate-600 hover:text-green-900 hover:bg-green-50 rounded-lg px-2 py-1.5 transition-colors flex items-start gap-1.5">
+                <ChevronRight className="w-3 h-3 mt-0.5 shrink-0 text-green-500" />
                 {q}
               </button>
             ))}
@@ -314,10 +314,10 @@ function DashboardPanel({
 
 function CompanyCard({ data }: { data: { name?: string; code?: string; industry?: string; position?: string; position_detail?: string; materials?: any[] } }) {
   return (
-    <div className="bg-gradient-to-br from-purple-50 to-white rounded-xl border border-purple-200 p-3">
+    <div className="bg-gradient-to-br from-green-50 to-white rounded-xl border border-green-200 p-3">
       <div className="flex items-center gap-2 mb-3">
-        <div className="w-8 h-8 rounded-lg bg-purple-600 flex items-center justify-center">
-          <Bot className="w-4 h-4 text-purple-100" />
+        <div className="w-8 h-8 rounded-lg bg-green-800 flex items-center justify-center">
+          <Bot className="w-4 h-4 text-green-100" />
         </div>
         <div>
           <p className="text-sm font-semibold text-slate-800">{data.name}</p>
@@ -344,7 +344,7 @@ function CompanyCard({ data }: { data: { name?: string; code?: string; industry?
         )}
       </div>
       {data.materials && data.materials.length > 0 && (
-        <div className="mt-3 pt-3 border-t border-purple-100">
+        <div className="mt-3 pt-3 border-t border-green-100">
           <p className="text-[10px] text-slate-500 mb-1.5 uppercase">原材料成本结构</p>
           <div className="space-y-1.5">
             {data.materials.map((m: any, i: number) => (
@@ -352,7 +352,7 @@ function CompanyCard({ data }: { data: { name?: string; code?: string; industry?
                 <span className="text-xs text-slate-600">{m.name}</span>
                 <div className="flex items-center gap-2">
                   <div className="w-20 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-purple-500 rounded-full" style={{ width: `${Math.min(100, m.cost_pct || 0)}%` }} />
+                    <div className="h-full bg-green-500 rounded-full" style={{ width: `${Math.min(100, m.cost_pct || 0)}%` }} />
                   </div>
                   <span className="text-xs font-medium text-slate-700 w-10 text-right">{m.cost_pct || 0}%</span>
                 </div>
@@ -426,7 +426,7 @@ function ReportPanel({ report, onClose, onExportHTML, onExportPDF }: {
     <div className="absolute inset-0 z-30 bg-white overflow-auto">
       <div className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-slate-200 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <FileText className="w-5 h-5 text-purple-600" />
+          <FileText className="w-5 h-5 text-green-800" />
           <div>
             <h2 className="font-semibold text-slate-900">MRI 风险分析报告</h2>
             <p className="text-xs text-slate-500">ID: {report.report_id} · {report.generated_at} · MRI Agent v1</p>
@@ -436,7 +436,7 @@ function ReportPanel({ report, onClose, onExportHTML, onExportPDF }: {
           <button onClick={onExportHTML} className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg border border-slate-200 hover:bg-slate-50">
             <Download className="w-3.5 h-3.5" /> HTML
           </button>
-          <button onClick={onExportPDF} className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-purple-600 text-white hover:bg-purple-700">
+          <button onClick={onExportPDF} className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-green-800 text-white hover:bg-green-900">
             <Printer className="w-3.5 h-3.5" /> PDF
           </button>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100"><X className="w-5 h-5 text-slate-400" /></button>
@@ -447,7 +447,7 @@ function ReportPanel({ report, onClose, onExportHTML, onExportPDF }: {
         {/* Summary */}
         <section>
           <h3 className="text-lg font-bold text-slate-900 mb-3">Executive Summary</h3>
-          <div className="bg-gradient-to-r from-purple-50 to-slate-50 rounded-xl border border-purple-200 p-5">
+          <div className="bg-gradient-to-r from-green-50 to-slate-50 rounded-xl border border-green-200 p-5">
             <h4 className="font-semibold text-slate-900 mb-2">
               风险判定：{report.material_name}
               <span className="ml-2 px-2 py-0.5 rounded text-xs font-medium"
@@ -485,7 +485,7 @@ function ReportPanel({ report, onClose, onExportHTML, onExportPDF }: {
           <div className="space-y-2">
             {report.reasoning.map((s, i) => (
               <div key={i} className="flex gap-3 p-3 bg-slate-50 rounded-lg border border-slate-100">
-                <div className="w-7 h-7 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center text-xs font-bold shrink-0">{s.step}</div>
+                <div className="w-7 h-7 rounded-full bg-green-100 text-green-900 flex items-center justify-center text-xs font-bold shrink-0">{s.step}</div>
                 <div><p className="text-sm font-medium text-slate-800">{s.title}</p><p className="text-xs text-slate-500 mt-0.5">{s.detail}</p></div>
               </div>
             ))}
@@ -499,7 +499,7 @@ function ReportPanel({ report, onClose, onExportHTML, onExportPDF }: {
             <div className="space-y-1">
               {report.sources.map((s, i) => (
                 <div key={i} className="flex items-center gap-2 px-3 py-2 bg-slate-50 rounded-lg border border-slate-100">
-                  <span className="text-xs font-medium text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded">{s.source}</span>
+                  <span className="text-xs font-medium text-green-800 bg-green-50 px-1.5 py-0.5 rounded">{s.source}</span>
                   <span className="text-sm text-slate-700 truncate">{s.content}</span>
                 </div>
               ))}
@@ -548,8 +548,8 @@ function ReportPanel({ report, onClose, onExportHTML, onExportPDF }: {
           <h3 className="text-base font-semibold text-slate-900 mb-3">后续建议</h3>
           <div className="space-y-2">
             {report.recommendations.map((r, i) => (
-              <div key={i} className="flex items-start gap-3 p-3 bg-gradient-to-r from-purple-50 to-white rounded-lg border border-purple-100">
-                <div className="w-6 h-6 rounded-full bg-purple-600 text-white flex items-center justify-center text-xs font-bold shrink-0">{r.priority}</div>
+              <div key={i} className="flex items-start gap-3 p-3 bg-gradient-to-r from-green-50 to-white rounded-lg border border-green-100">
+                <div className="w-6 h-6 rounded-full bg-green-800 text-white flex items-center justify-center text-xs font-bold shrink-0">{r.priority}</div>
                 <div><p className="text-sm font-semibold text-slate-800">{r.action}</p><p className="text-xs text-slate-500 mt-0.5">{r.detail}</p></div>
               </div>
             ))}
@@ -684,8 +684,8 @@ export default function AgentPage() {
             {showLeftPanel ? <PanelRightClose className="w-4 h-4" /> : <PanelRightOpen className="w-4 h-4" />}
           </button>
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-purple-600 flex items-center justify-center">
-              <Bot className="w-4 h-4 text-purple-100" />
+            <div className="w-7 h-7 rounded-lg bg-green-800 flex items-center justify-center">
+              <Bot className="w-4 h-4 text-green-100" />
             </div>
             <div>
               <h1 className="text-sm font-semibold text-slate-900">AI Agent · MRI 投研助手</h1>
@@ -697,12 +697,12 @@ export default function AgentPage() {
         <div className="flex items-center gap-2">
           {/* Model selector */}
           <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)}
-            className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-600 focus:outline-none focus:ring-2 focus:ring-purple-500/30">
+            className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-600 focus:outline-none focus:ring-2 focus:ring-green-500/30">
             {models?.map(m => <option key={m.id} value={m.id}>{m.name}</option>) || <option value="glm-5.2">GLM-5.2</option>}
           </select>
 
           <button onClick={handleGenerateReport} disabled={!selectedCompanyId || isGenerating}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50">
+            className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-green-800 text-white hover:bg-green-900 disabled:opacity-50">
             {isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
             生成报告
           </button>
@@ -736,7 +736,7 @@ export default function AgentPage() {
             {SCENARIOS.map(s => (
               <button key={s.key} onClick={() => handleScenarioClick(s.key)}
                 className={cn('flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors',
-                  activeScenario === s.key ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50')}>
+                  activeScenario === s.key ? 'bg-green-50 text-green-900 border-green-200' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50')}>
                 <s.icon className="w-3 h-3" />{s.label}
               </button>
             ))}
@@ -746,8 +746,8 @@ export default function AgentPage() {
           <div className="flex-1 overflow-auto px-4 py-3">
             {messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-center">
-                <div className="w-14 h-14 rounded-2xl bg-purple-100 flex items-center justify-center mb-4">
-                  <Bot className="w-7 h-7 text-purple-600" />
+                <div className="w-14 h-14 rounded-2xl bg-green-100 flex items-center justify-center mb-4">
+                  <Bot className="w-7 h-7 text-green-800" />
                 </div>
                 <h2 className="text-base font-semibold text-slate-800 mb-1">MRI Agent · 原材料风险智能分析</h2>
                 <p className="text-xs text-slate-500 max-w-sm mb-4">
@@ -761,8 +761,8 @@ export default function AgentPage() {
                   <div className="grid grid-cols-3 gap-2 w-full max-w-sm">
                     {SCENARIOS.map(s => (
                       <button key={s.key} onClick={() => handleScenarioClick(s.key)}
-                        className="flex flex-col items-center gap-1 p-3 rounded-xl border border-slate-200 bg-white hover:bg-purple-50 hover:border-purple-200 transition-colors">
-                        <s.icon className="w-5 h-5 text-purple-600" />
+                        className="flex flex-col items-center gap-1 p-3 rounded-xl border border-slate-200 bg-white hover:bg-green-50 hover:border-green-200 transition-colors">
+                        <s.icon className="w-5 h-5 text-green-800" />
                         <span className="text-xs font-medium text-slate-700">{s.label}</span>
                       </button>
                     ))}
@@ -774,12 +774,12 @@ export default function AgentPage() {
                 {messages.map(msg => (
                   <div key={msg.id} className={cn('flex gap-2.5', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
                     {msg.role === 'assistant' && (
-                      <div className="w-7 h-7 rounded-lg bg-purple-100 flex items-center justify-center shrink-0 mt-0.5">
-                        <Bot className="w-3.5 h-3.5 text-purple-600" />
+                      <div className="w-7 h-7 rounded-lg bg-green-100 flex items-center justify-center shrink-0 mt-0.5">
+                        <Bot className="w-3.5 h-3.5 text-green-800" />
                       </div>
                     )}
                     <div className={cn('max-w-[72%] rounded-2xl px-3.5 py-2.5',
-                      msg.role === 'user' ? 'bg-purple-600 text-white' : 'bg-white border border-slate-200 shadow-sm')}>
+                      msg.role === 'user' ? 'bg-green-800 text-white' : 'bg-white border border-slate-200 shadow-sm')}>
                       {msg.role === 'user' ? (
                         <p className="text-sm">{msg.content}</p>
                       ) : (
@@ -809,12 +809,12 @@ export default function AgentPage() {
                 ))}
                 {isProcessing && (
                   <div className="flex gap-2.5 justify-start">
-                    <div className="w-7 h-7 rounded-lg bg-purple-100 flex items-center justify-center"><Bot className="w-3.5 h-3.5 text-purple-600" /></div>
+                    <div className="w-7 h-7 rounded-lg bg-green-100 flex items-center justify-center"><Bot className="w-3.5 h-3.5 text-green-800" /></div>
                     <div className="bg-white border rounded-2xl px-3.5 py-2.5 shadow-sm">
                       <div className="flex gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-bounce" />
-                        <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: '0.15s' }} />
-                        <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: '0.3s' }} />
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-bounce" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-bounce" style={{ animationDelay: '0.15s' }} />
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-bounce" style={{ animationDelay: '0.3s' }} />
                       </div>
                     </div>
                   </div>
@@ -830,10 +830,10 @@ export default function AgentPage() {
               <input ref={inputRef} type="text" value={inputValue}
                 onChange={e => setInputValue(e.target.value)} onKeyDown={handleKeyDown}
                 placeholder="输入问题，Enter 发送..."
-                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/30 disabled:opacity-50"
+                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500/30 disabled:opacity-50"
                 disabled={isProcessing} />
               <button onClick={handleSend} disabled={!inputValue.trim() || isProcessing}
-                className="shrink-0 w-10 h-10 rounded-xl bg-purple-600 text-white flex items-center justify-center hover:bg-purple-700 disabled:opacity-40">
+                className="shrink-0 w-10 h-10 rounded-xl bg-green-800 text-white flex items-center justify-center hover:bg-green-900 disabled:opacity-40">
                 {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-4 h-4" />}
               </button>
             </div>

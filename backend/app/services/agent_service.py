@@ -1,6 +1,7 @@
 """Agent 服务 — MRI Agent: 对话、报告、会话管理"""
 
 import json, logging, uuid
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from openai import OpenAI
@@ -18,6 +19,23 @@ from app.schemas.chat import (
 
 logger = logging.getLogger(__name__)
 TZ = timezone(timedelta(hours=8))
+
+
+def _run_with_timeout(fn, timeout_secs: float, default=None):
+    """在超时时间内执行函数，超时返回 default"""
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        future = executor.submit(fn)
+        return future.result(timeout=timeout_secs)
+    except FuturesTimeoutError:
+        logger.warning(f"Function timeout after {timeout_secs}s")
+        return default
+    except Exception as e:
+        logger.warning(f"Function error: {e}")
+        return default
+    finally:
+        executor.shutdown(wait=False)
+
 
 AVAILABLE_MODELS = {
     "glm-5.2": "GLM-5.2 (通用)",
@@ -144,9 +162,9 @@ def _search_news(company_id: str = None, material: str = None, days: int = 3) ->
         cutoff = datetime.now(TZ) - timedelta(days=days)
         q = db.query(News).filter(News.pub_time >= cutoff, News.is_relevant == True)
         if company_id:
-            company = db.query(Company).filter(Company.id == company_id).first()
-            if company and company.code:
-                q = q.filter(News.company_entities.contains(company.code))
+            comp = db.query(Company).filter(Company.id == company_id).first()
+            if comp and comp.id:
+                q = q.filter(News.company_entities.contains(comp.id))
         if material:
             q = q.filter(News.metal_entities.contains(material))
         news_list = q.order_by(News.pub_time.desc()).limit(20).all()
@@ -158,24 +176,22 @@ def _search_news(company_id: str = None, material: str = None, days: int = 3) ->
 
 def _get_price_info(material: str) -> dict:
     try:
-        from app.services.futures_service import get_futures_quote, get_futures_kline
-        contract_map = {"碳酸锂": "LC0", "锂": "LC0", "铜": "CU0", "沪铜": "CU0", "铝": "AL0", "沪铝": "AL0",
-                        "镍": "NI0", "沪镍": "NI0", "锌": "ZN0", "沪锌": "ZN0", "螺纹钢": "RB0",
-                        "热卷": "HC0", "黄金": "AU0", "白银": "AG0", "原油": "SC0"}
-        contract = contract_map.get(material)
-        if not contract:
-            return {"error": f"无对应合约"}
-        quote = get_futures_quote(contract)
-        kline = get_futures_kline(contract, period="daily")
-        prices = [d["close"] for d in kline[-30:]] if kline else []
+        from app.services.futures_service import get_futures_quote, get_futures_history
+        quote = _run_with_timeout(lambda: get_futures_quote(material), 3.0)
+        history = _run_with_timeout(lambda: get_futures_history(material, days=30), 3.0)
+        prices = [d["close"] for d in history] if history else []
         vol = None
         if len(prices) >= 5:
             import statistics
             rets = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices))]
             vol = round(statistics.stdev(rets) * (252**0.5) * 100, 2)
-        return {"contract": contract, "current_price": quote.get("price") if quote else None,
-                "change_pct_24h": quote.get("change_pct") if quote else None,
-                "volatility_30d_pct": vol, "prices_30d": prices}
+        return {
+            "contract": quote.get("contract") if quote else "",
+            "current_price": quote.get("price") if quote else None,
+            "change_pct_24h": quote.get("change_pct") if quote else None,
+            "volatility_30d_pct": vol,
+            "prices_30d": prices,
+        }
     except Exception as e:
         logger.warning(f"获取价格失败 {material}: {e}")
         return {"error": str(e)}
@@ -189,8 +205,8 @@ def _get_cost_exposure(company_id: str) -> list[dict]:
         for m in materials:
             item = {"name": m.material_name or "", "cost_pct": float(m.cost_pct or 0),
                     "direction": m.direction or "不利", "contract": m.contract or "", "source": m.source or "行业推断"}
-            if m.material_name:
-                item["price_info"] = _get_price_info(m.material_name)
+            # 价格信息通过独立接口异步获取，避免阻塞对话
+            item["price_info"] = {"pending": True}
             results.append(item)
         return results
     finally:
@@ -200,12 +216,12 @@ def _get_cost_exposure(company_id: str) -> list[dict]:
 def _get_company_context(company_id: str) -> dict:
     db = SessionLocal()
     try:
-        c = db.query(Company).filter(Company.id == company_id).first()
-        if not c:
+        comp = db.query(Company).filter(Company.id == company_id).first()
+        if not comp:
             return {"error": "公司不存在"}
         mats = db.query(CompanyMaterial).filter(CompanyMaterial.company_id == company_id).all()
-        return {"name": c.name or "未知", "code": c.code or "", "industry": c.industry or "未知",
-                "position": c.position or "未知", "position_detail": c.position_detail or "",
+        return {"name": comp.name or "未知", "code": comp.id or "", "industry": comp.industry or "未知",
+                "position": comp.position or "未知", "position_detail": comp.position_detail or "",
                 "materials": [{"name": m.material_name or "", "cost_pct": float(m.cost_pct or 0),
                               "direction": m.direction or "不利", "source": m.source or "行业推断"} for m in mats]}
     finally:
@@ -276,19 +292,31 @@ def process_chat(
 
     messages.append({"role": "user", "content": user_msg})
 
-    # LLM call
+    # LLM call with hard timeout
     reply_text = ""
     risk_result = None
     if client:
-        try:
+        def _call_llm():
             actual_model = settings.LLM_MODEL if model == "glm-5.2" else model
-            response = client.chat.completions.create(
+            return client.chat.completions.create(
                 model=actual_model, messages=messages,
-                temperature=0.3, max_tokens=2000, timeout=60)
+                temperature=0.3, max_tokens=1200, timeout=5,
+            )
+
+        executor = ThreadPoolExecutor(max_workers=1)
+        try:
+            future = executor.submit(_call_llm)
+            response = future.result(timeout=7)
             reply_text = response.choices[0].message.content or ""
+        except FuturesTimeoutError:
+            logger.error("LLM call hard timeout")
+            reply_text = "AI分析服务响应超时（7秒）。可能原因：\n1. 当前网络连接较慢\n2. LLM API服务端繁忙/限流\n3. API Key或模型配置不正确\n\n请检查 `backend/.env` 中的 LLM_BASE_URL 和 LLM_MODEL 配置。"
         except Exception as e:
             logger.error(f"LLM error: {e}")
-            reply_text = f"AI分析服务暂时不可用（{str(e)[:80]}）。请检查API Key配置。"
+            err_msg = str(e)
+            reply_text = f"AI分析服务暂时不可用：{err_msg[:150]}。请检查API Key配置。"
+        finally:
+            executor.shutdown(wait=False)
 
         if scenario == "risk_scan" and company_id and cost_data:
             try:
@@ -460,13 +488,13 @@ def _touch_session(session_id: str):
 def generate_report(company_id: str, material: str = None) -> RiskReport:
     db = SessionLocal()
     try:
-        company = db.query(Company).filter(Company.id == company_id).first()
-        if not company:
+        comp = db.query(Company).filter(Company.id == company_id).first()
+        if not comp:
             raise ValueError(f"公司不存在: {company_id}")
 
         materials = db.query(CompanyMaterial).filter(CompanyMaterial.company_id == company_id).all()
         if not materials:
-            raise ValueError(f"公司 {company.name} 无原材料数据")
+            raise ValueError(f"公司 {comp.name} 无原材料数据")
 
         target = materials[0]
         if material:
@@ -487,7 +515,7 @@ def generate_report(company_id: str, material: str = None) -> RiskReport:
 
         reasoning = [
             ReasoningStep(step=1, title="识别范围",
-                         detail=f"关注物料: {t_name}; 企业: {company.name}({company.code})"),
+                         detail=f"关注物料: {t_name}; 企业: {comp.name}({comp.id})"),
             ReasoningStep(step=2, title="感知信号",
                          detail=f"新闻源检索{len(risk_news)}条; 30日波动率σ≈{price_info.get('volatility_30d_pct','未知')}%"),
             ReasoningStep(step=3, title="推理传导",
@@ -526,8 +554,8 @@ def generate_report(company_id: str, material: str = None) -> RiskReport:
         charts.append(ChartData(type="gauge", title="综合风险评分", data={"score": risk_result["score"]}))
 
         return RiskReport(
-            report_id=rid, generated_at=now_str, company_name=company.name or "未知",
-            company_code=company.code or "", material_name=t_name,
+            report_id=rid, generated_at=now_str, company_name=comp.name or "未知",
+            company_code=comp.id or "", material_name=t_name,
             risk_score=risk_result["score"], risk_level=level,
             summary=(f"{t_name}当前{price_info.get('current_price','未知')}, 24H{price_info.get('change_pct_24h',0):+.1f}%."
                     f"加权综合得分{risk_result['score']}, 判定**{level}**."),
