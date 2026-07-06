@@ -19,6 +19,8 @@ from app.services._scrape_control import (
     mark_fetch_time as _mark_fetch_time,
     retry_with_backoff as _retry_with_backoff,
     acquire_lock as _acquire_lock,
+    should_skip_source as _should_skip_source,
+    get_failure_stats as _get_failure_stats,
     SCRAPE_COOLDOWN,
 )
 
@@ -281,11 +283,15 @@ def get_stock_kline(code: str, frequency: str = "daily", start_date: str = "", e
                 if not daily_data:
                     raise RuntimeError(f"无法获取 {code} 的K线数据，数据源暂不可用")
 
-    # 按日期范围过滤
+    # 按日期范围过滤（统一日期格式为 YYYYMMDD 进行比较）
+    # 数据中的日期格式为 YYYY-MM-DD，参数格式为 YYYYMMDD
+    def _norm(d: str) -> str:
+        return d.replace("-", "")  # "2026-07-03" → "20260703"
+
     if start_date:
-        daily_data = [d for d in daily_data if d["date"] >= start_date]
+        daily_data = [d for d in daily_data if _norm(d["date"]) >= start_date]
     if end_date:
-        daily_data = [d for d in daily_data if d["date"] <= end_date]
+        daily_data = [d for d in daily_data if _norm(d["date"]) <= end_date]
 
     # 按频率返回
     if frequency == "weekly":
@@ -301,6 +307,7 @@ def _fetch_daily_kline(code: str, adjust: str, cache_key: str) -> list[dict]:
     import akshare as ak
 
     # 方案A: 新浪源 (更稳定，不易触发反爬)
+    sina_failed = False
     try:
         logger.info(f"尝试新浪源获取 {code} 日线...")
         df = _retry_with_backoff(
@@ -312,6 +319,7 @@ def _fetch_daily_kline(code: str, adjust: str, cache_key: str) -> list[dict]:
             ),
             max_retries=1,
             label=f"新浪K线 {code}",
+            source="sina",
         )
 
         if df is not None and not df.empty:
@@ -321,31 +329,36 @@ def _fetch_daily_kline(code: str, adjust: str, cache_key: str) -> list[dict]:
                 logger.info(f"新浪源获取 {code} 日线成功: {len(daily_data)} 条")
                 return daily_data
     except Exception as e:
+        sina_failed = True
         logger.warning(f"新浪源获取 {code} 失败: {e}，尝试东财源...")
 
-    # 方案B: 东财源 (数据更全但可能被反爬)
-    try:
-        logger.info(f"尝试东财源获取 {code} 日线...")
-        df = _retry_with_backoff(
-            lambda: ak.stock_zh_a_hist(
-                symbol=code,
-                period="daily",
-                start_date="20200101",
-                end_date="20991231",
-                adjust=adjust,
-            ),
-            max_retries=1,
-            label=f"东财K线 {code}",
-        )
+    # 方案B: 东财源 (仅在未被封禁时尝试)
+    if not _should_skip_source("eastmoney"):
+        try:
+            logger.info(f"尝试东财源获取 {code} 日线...")
+            df = _retry_with_backoff(
+                lambda: ak.stock_zh_a_hist(
+                    symbol=code,
+                    period="daily",
+                    start_date="20200101",
+                    end_date="20991231",
+                    adjust=adjust,
+                ),
+                max_retries=1,
+                label=f"东财K线 {code}",
+                source="eastmoney",
+            )
 
-        if df is not None and not df.empty:
-            daily_data = _parse_kline_df(df)
-            if daily_data:
-                _write_cache(cache_key, {"data": daily_data})
-                logger.info(f"东财源获取 {code} 日线成功: {len(daily_data)} 条")
-                return daily_data
-    except Exception as e:
-        logger.warning(f"东财源获取 {code} 也失败: {e}")
+            if df is not None and not df.empty:
+                daily_data = _parse_kline_df(df)
+                if daily_data:
+                    _write_cache(cache_key, {"data": daily_data})
+                    logger.info(f"东财源获取 {code} 日线成功: {len(daily_data)} 条")
+                    return daily_data
+        except Exception as e:
+            logger.warning(f"东财源获取 {code} 也失败: {e}")
+    elif sina_failed:
+        logger.warning(f"东财源已被封禁，跳过 {code}")
 
     # 方案C: 过期缓存兜底
     expired = _read_cache_expired(cache_key)
@@ -359,10 +372,12 @@ def _fetch_daily_kline(code: str, adjust: str, cache_key: str) -> list[dict]:
 def get_stock_info(code: str) -> dict:
     """获取A股公司基本信息（市值/行业/股本等）
 
-    双数据源（反爬友好）：
+    双数据源（反爬友好）:
     1. stock_zh_a_spot_em — 全市场实时行情(总市值)，一次调用覆盖所有A股，
        5分钟共享缓存，大幅减少API调用次数
     2. stock_individual_info_em — 详细信息(行业/总股本)，仅兜底
+
+    反爬保护：东财源连续失败5次以上自动跳过10分钟，避免无效请求加剧封禁。
 
     Args:
         code: 6位数字股票代码
@@ -388,33 +403,39 @@ def get_stock_info(code: str) -> dict:
                 "pe": None, "pb": None}
 
         # --- 数据源1（优先）: stock_zh_a_spot_em 全市场实时行情 ---
-        # 一次API调用覆盖所有A股，5分钟共享缓存，比 per-stock 调用反爬风险低得多
-        try:
-            spot = _get_spot_market_cache()
-            for _, row in spot.iterrows():
-                if str(row.get("代码", "")) == code:
-                    mc = row.get("总市值")
-                    info["total_market_cap"] = float(mc) if mc and mc != "-" else None
-                    cmc = row.get("流通市值")
-                    info["circulating_market_cap"] = float(cmc) if cmc and cmc != "-" else None
-                    # 市盈率(动态) & 市净率 — akshare spot 行情包含这两个字段
-                    pe_val = row.get("市盈率-动态")
-                    info["pe"] = float(pe_val) if pe_val is not None and pe_val != "-" and float(pe_val) > 0 else None
-                    pb_val = row.get("市净率")
-                    info["pb"] = float(pb_val) if pb_val is not None and pb_val != "-" and float(pb_val) > 0 else None
-                    logger.info(f"公司信息 {code} 从全市场行情获取: 市值={info['total_market_cap']}, PE={info['pe']}, PB={info['pb']}")
-                    break
-        except Exception as e:
-            logger.warning(f"公司信息 {code} spot_em 失败: {e}")
+        # 仅在未被封禁时尝试
+        spot_ok = False
+        if not _should_skip_source("eastmoney"):
+            try:
+                spot = _get_spot_market_cache()
+                for _, row in spot.iterrows():
+                    if str(row.get("代码", "")) == code:
+                        mc = row.get("总市值")
+                        info["total_market_cap"] = float(mc) if mc and mc != "-" else None
+                        cmc = row.get("流通市值")
+                        info["circulating_market_cap"] = float(cmc) if cmc and cmc != "-" else None
+                        # 市盈率(动态) & 市净率 — akshare spot 行情包含这两个字段
+                        pe_val = row.get("市盈率-动态")
+                        info["pe"] = float(pe_val) if pe_val is not None and pe_val != "-" and float(pe_val) > 0 else None
+                        pb_val = row.get("市净率")
+                        info["pb"] = float(pb_val) if pb_val is not None and pb_val != "-" and float(pb_val) > 0 else None
+                        spot_ok = True
+                        logger.info(f"公司信息 {code} 从全市场行情获取: 市值={info['total_market_cap']}, PE={info['pe']}, PB={info['pb']}")
+                        break
+            except Exception as e:
+                logger.warning(f"公司信息 {code} spot_em 失败: {e}")
+        else:
+            logger.info(f"公司信息 {code}: 跳过东财 spot（已被暂时封禁）")
 
         # --- 数据源2（兜底）: stock_individual_info_em 详细信息 ---
-        # 仅在市值获取失败时尝试，减少不必要的API调用
-        if info["total_market_cap"] is None:
+        # 仅在市值获取失败且未被封禁时尝试
+        if info["total_market_cap"] is None and not _should_skip_source("eastmoney"):
             try:
                 def _fetch_info():
                     return ak.stock_individual_info_em(symbol=code)
 
-                df = _retry_with_backoff(_fetch_info, max_retries=1, label=f"公司信息 {code}")
+                df = _retry_with_backoff(_fetch_info, max_retries=1, label=f"公司信息 {code}",
+                                        source="eastmoney")
 
                 for _, row in df.iterrows():
                     key = str(row["item"])
@@ -438,15 +459,23 @@ def get_stock_info(code: str) -> dict:
             except Exception as e:
                 logger.warning(f"公司信息 {code} individual_info 失败: {e}")
 
-        # 写入缓存（即使市值为空也缓存，避免反复重试触发反爬）
-        _write_cache(cache_key, {"data": info})
-
-        # 如果还是空，尝试过期缓存
-        if info["total_market_cap"] is None:
+        # ---- 关键修复：不为空结果写缓存 ----
+        # 如果所有数据源都失败（info 全是 null），尝试过期缓存
+        has_real_data = info["total_market_cap"] is not None
+        if has_real_data:
+            # 有真实数据时才写入缓存
+            _write_cache(cache_key, {"data": info})
+        else:
+            # 所有数据源失败 → 尝试过期缓存（保留旧数据比 null 好）
             expired = _read_cache_expired(cache_key)
             if expired and "data" in expired and expired["data"].get("total_market_cap"):
-                logger.warning(f"使用过期缓存 {code}")
+                logger.warning(f"公司信息 {code} 所有数据源失败，使用过期缓存")
                 return expired["data"]
+            # 无过期缓存但 spot 成功了（只是该股票不在结果中）→ 允许缓存 null
+            # 避免每次请求都重复调用 akshare
+            if spot_ok:
+                _write_cache(cache_key, {"data": info})
+            # 否则不写缓存 — 下次请求再试（避免永久卡在 null）
 
         return info
 
@@ -537,6 +566,8 @@ def _get_spot_market_cache():
 
     缓存未过期时零开销直接返回。
     缓存过期时单次尝试 akshare（无重试），失败则保留旧缓存 + 抛异常。
+
+    反爬保护：东财源被封禁时自动跳过，不发起无效请求。
     """
     global _spot_cache
     now = time.time()
@@ -546,6 +577,13 @@ def _get_spot_market_cache():
 
     import akshare as ak
 
+    # 检查东财源是否被暂时封禁
+    if _should_skip_source("eastmoney"):
+        if _spot_cache is not None:
+            logger.info("全市场行情: 东财源被封禁，返回旧缓存")
+            return _spot_cache["df"]
+        raise RuntimeError("东财源暂时不可用（反爬保护），且无旧缓存可用")
+
     # 单次尝试，不重试 — 避免后台线程连续重试触发反爬
     # 如果失败，旧缓存仍保留，等下一个 TTL 周期再试
     _cooldown()
@@ -553,11 +591,16 @@ def _get_spot_market_cache():
         df = ak.stock_zh_a_spot_em()
     except Exception as e:
         logger.warning(f"全市场实时行情获取失败（旧缓存仍可用）: {e}")
+        # 标记东财源失败（用于自适应退避）
+        from app.services._scrape_control import mark_source_failure
+        mark_source_failure("eastmoney")
         if _spot_cache is not None:
             return _spot_cache["df"]  # 返回旧缓存
         raise  # 无旧缓存时向上抛异常
 
     _mark_fetch_time()
+    from app.services._scrape_control import mark_source_success
+    mark_source_success("eastmoney")
     _spot_cache = {"df": df, "_ts": now}
     logger.info(f"全市场实时行情获取成功: {len(df)} 只股票 (TTL={ttl}s)")
     return df

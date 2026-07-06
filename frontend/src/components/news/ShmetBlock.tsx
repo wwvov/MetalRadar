@@ -80,7 +80,7 @@ export function ShmetBlock() {
                 暂无{metalTab || '要闻'}相关新闻
               </p>
             ) : (
-              <div className="space-y-2.5 max-h-[500px] overflow-y-auto pr-1">
+              <div className="space-y-2.5 max-h-[400px] overflow-y-auto pr-1">
                 {query.data.news.map((item) => (
                   <NewsCard
                     key={item.id}

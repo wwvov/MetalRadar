@@ -137,25 +137,44 @@ def _write_cache(symbol: str, data: dict):
 
 
 def _parse_kline_df(df: pd.DataFrame) -> list[dict]:
-    """将 akshare DataFrame 转为标准 K 线记录列表"""
+    """将 akshare DataFrame 转为标准 K 线记录列表
+
+    兼容两种数据源:
+    - futures_zh_daily_sina: 英文列名 (date/open/high/low/close/volume/hold/settle)
+    - futures_main_sina: 中文列名 (日期/开盘价/最高价/最低价/收盘价/成交量/持仓量/动态结算价)
+    两种源的列顺序一致，优先按列名读取以增强鲁棒性。
+    """
     records = []
     for _, row in df.iterrows():
         records.append({
-            "date": str(row.iloc[0]),
-            "open": float(row.iloc[1]),
-            "high": float(row.iloc[2]),
-            "low": float(row.iloc[3]),
-            "close": float(row.iloc[4]),
-            "volume": int(row.iloc[5]),
-            "hold": int(row.iloc[6]),
+            "date": str(_safe_col(row, ["date", "日期"])),
+            "open": float(_safe_col(row, ["open", "开盘价"]) or 0),
+            "high": float(_safe_col(row, ["high", "最高价"]) or 0),
+            "low": float(_safe_col(row, ["low", "最低价"]) or 0),
+            "close": float(_safe_col(row, ["close", "收盘价"]) or 0),
+            "volume": int(float(_safe_col(row, ["volume", "成交量"]) or 0)),
+            "hold": int(float(_safe_col(row, ["hold", "持仓量"]) or 0)),
         })
     return records
+
+
+def _safe_col(row, candidates: list[str]):
+    """从 DataFrame 行中按优先级取第一个存在的列值"""
+    for c in candidates:
+        if c in row.index and pd.notna(row[c]):
+            return row[c]
+    # fallback: 对中文列名可能在不同终端显示为乱码的情况，用 iloc 位置
+    return None
 
 
 def _fetch_kline(symbol: str) -> pd.DataFrame:
     """获取单个品种主力合约全部历史K线（带缓存 + 线程安全反爬控制）
 
     这是所有期货数据的唯一入口。quote / percentile / history 均从此派生。
+
+    双数据源:
+    1. futures_zh_daily_sina (优先) — 新浪日线，英文列名，更稳定
+    2. futures_main_sina (回退) — 新浪主力合约，中文列名，兜底
     """
     # 1. 检查缓存（锁外，快速路径）
     cached = _read_cache(symbol)
@@ -174,16 +193,33 @@ def _fetch_kline(symbol: str) -> pd.DataFrame:
         try:
             import akshare as ak
 
-            def _fetch():
-                return ak.futures_main_sina(symbol=symbol)
+            # 方案A: futures_zh_daily_sina（优先 — 英文列名，更稳定）
+            try:
+                def _fetch_sina_daily():
+                    return ak.futures_zh_daily_sina(symbol=symbol)
 
-            df = retry_with_backoff(_fetch, max_retries=2, label=f"期货K线 {symbol}")
-            logger.info(f"akshare 获取 {symbol} K线: {len(df)} 条")
+                df = retry_with_backoff(_fetch_sina_daily, max_retries=1,
+                                       label=f"期货K线(sina_daily) {symbol}", source="sina")
+                logger.info(f"akshare(futures_zh_daily_sina) 获取 {symbol} K线: {len(df)} 条")
 
-            # 缓存原始数据
-            kline_data = _parse_kline_df(df)
-            _write_cache(symbol, {"kline": kline_data})
-            return df
+                kline_data = _parse_kline_df(df)
+                _write_cache(symbol, {"kline": kline_data})
+                return df
+
+            except Exception as sina_err:
+                logger.warning(f"futures_zh_daily_sina 获取 {symbol} 失败: {sina_err}，尝试 futures_main_sina...")
+
+                # 方案B: futures_main_sina（兜底 — 中文列名，按 iloc 位置读取）
+                def _fetch_main_sina():
+                    return ak.futures_main_sina(symbol=symbol)
+
+                df = retry_with_backoff(_fetch_main_sina, max_retries=1,
+                                       label=f"期货K线(main_sina) {symbol}", source="sina")
+                logger.info(f"akshare(futures_main_sina) 获取 {symbol} K线: {len(df)} 条")
+
+                kline_data = _parse_kline_df(df)
+                _write_cache(symbol, {"kline": kline_data})
+                return df
 
         except ImportError:
             logger.error("akshare 未安装")
@@ -193,7 +229,7 @@ def _fetch_kline(symbol: str) -> pd.DataFrame:
             # 尝试返回过期缓存作为后备
             expired = _read_cache_expired(symbol)
             if expired and "kline" in expired:
-                logger.warning(f"使用过期缓存 {symbol}（akshare 调用失败）")
+                logger.warning(f"使用过期缓存 {symbol}（所有数据源失败）")
                 return pd.DataFrame(expired["kline"])
             raise
 

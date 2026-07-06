@@ -71,11 +71,15 @@ def get_futures_kline(
         df = _fetch_kline(contract)
         records = _parse_kline_df(df)
 
-        # 按日期范围过滤
+        # 按日期范围过滤（统一日期格式为 YYYYMMDD 进行比较）
+        # 数据中的日期格式为 YYYY-MM-DD，参数格式为 YYYYMMDD
+        def _norm(d: str) -> str:
+            return d.replace("-", "")
+
         if start_date:
-            records = [r for r in records if r["date"] >= start_date]
+            records = [r for r in records if _norm(r["date"]) >= start_date]
         if end_date:
-            records = [r for r in records if r["date"] <= end_date]
+            records = [r for r in records if _norm(r["date"]) <= end_date]
 
         if period == "weekly":
             records = _resample_weekly(records)

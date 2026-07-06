@@ -252,6 +252,9 @@ function PercentileThermometer({
     low: 'bg-emerald-50 text-emerald-700',
   }
 
+  // 指针位置（防止溢出边界）
+  const pointerPct = Math.min(Math.max(pct, 3), 97)
+
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
@@ -263,15 +266,26 @@ function PercentileThermometer({
           <Button variant="ghost" size="sm" className={cn('h-5 text-[10px] px-1.5', period === 504 && 'bg-amber-100 text-amber-700')} onClick={onTogglePeriod} disabled={period === 504}>过去730天</Button>
         </div>
       </div>
-      <div className="relative h-4 rounded-full overflow-hidden" style={{ background: 'linear-gradient(to right, #10b981, #eab308, #f97316, #ef4444)' }}>
-        <div className="absolute top-0 -translate-x-1/2 z-10 transition-all" style={{ left: `${Math.min(Math.max(pct, 2), 98)}%` }}>
-          <div className="w-0 h-0 border-l-[5px] border-r-[5px] border-t-[6px] border-l-transparent border-r-transparent border-t-red-600 mx-auto" />
-          <span className="block text-center text-[9px] font-bold text-red-600 mt-0.5">{pct}%</span>
+
+      {/* 温度计条 + 指针：增加高度，指针用深色与所有背景色形成对比 */}
+      <div className="relative pt-5 pb-1">
+        {/* 梯度色条 */}
+        <div className="relative h-6 rounded-full" style={{ background: 'linear-gradient(to right, #10b981, #eab308, #f97316, #ef4444)' }}>
+          {/* 刻度标记：中心线 */}
+          <div className="absolute left-1/2 top-0 h-full w-px bg-white/60 z-10" />
         </div>
-      </div>
-      <div className="flex justify-between text-[10px] text-slate-400">
-        <span>低 {fmtPrice(year_low, unit)}</span>
-        <span>高 {fmtPrice(year_high, unit)}</span>
+        {/* 指针：深色三角形 + 百分比，位于色条上方，避免被 overflow 截断 */}
+        <div className="absolute top-0 -translate-x-1/2 z-20 transition-all duration-300" style={{ left: `${pointerPct}%` }}>
+          <div className="flex flex-col items-center">
+            <span className="text-[11px] font-bold text-slate-800 leading-none mb-0.5 tabular-nums">{pct}%</span>
+            <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-t-[7px] border-l-transparent border-r-transparent border-t-slate-700 drop-shadow-sm" />
+          </div>
+        </div>
+        {/* 低/高标签 */}
+        <div className="flex justify-between text-[10px] text-slate-400 mt-1">
+          <span>低 {fmtPrice(year_low, unit)}</span>
+          <span>高 {fmtPrice(year_high, unit)}</span>
+        </div>
       </div>
       <p className={cn('text-[11px] rounded px-2 py-1', levelBg[level])}>{levelText[level]}</p>
     </div>
@@ -404,7 +418,7 @@ export function MetalPriceDashboard({ follows, className }: Props) {
     : '--'
 
   return (
-    <Card className={cn('border-amber-200 shadow-sm flex flex-col min-h-[500px]', className)}>
+    <Card className={cn('border-amber-200 shadow-sm flex flex-col min-h-[420px]', className)}>
       {/* ===== 顶部标题 + 公司切换器 + 刷新 ===== */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-amber-100">
         <div className="flex items-center gap-2 min-w-0">
