@@ -1,41 +1,54 @@
 import api from './api'
 import type {
   ChatRequest, ChatResponse,
-  RiskReport, PressureTestScenario, ScenarioInput,
-  AgentCompanyContext,
+  RiskReport, MultiReport,
+  ChatSessionItem, ChatSessionDetail,
+  ModelInfo, DashboardData, RecommendedQuestions,
 } from '@/types/agent'
 
 export const agentService = {
-  /** 发送对话消息 */
-  async chat(request: ChatRequest): Promise<ChatResponse> {
-    const { data } = await api.post<ChatResponse>('/chat', request)
-    return data
+  chat(request: ChatRequest): Promise<ChatResponse> {
+    return api.post<ChatResponse>('/chat', request).then(r => r.data)
   },
 
-  /** 生成风险分析报告 */
-  async generateReport(companyId: string, material?: string): Promise<RiskReport> {
-    const { data } = await api.post<RiskReport>('/chat/report', {
-      company_id: companyId,
-      material,
-    })
-    return data
+  // Sessions
+  createSession(title = '新对话', model = 'glm-5.2'): Promise<ChatSessionItem> {
+    return api.post('/chat/sessions', { title, model }).then(r => r.data)
+  },
+  listSessions(): Promise<{ sessions: ChatSessionItem[] }> {
+    return api.get('/chat/sessions').then(r => r.data)
+  },
+  getSession(id: string): Promise<ChatSessionDetail> {
+    return api.get(`/chat/sessions/${id}`).then(r => r.data)
+  },
+  deleteSession(id: string): Promise<void> {
+    return api.delete(`/chat/sessions/${id}`).then(r => r.data)
+  },
+  renameSession(id: string, title: string): Promise<ChatSessionItem> {
+    return api.patch(`/chat/sessions/${id}`, { title }).then(r => r.data)
   },
 
-  /** 运行压力测试 */
-  async runPressureTest(
-    companyId: string,
-    scenarios: ScenarioInput[]
-  ): Promise<PressureTestScenario[]> {
-    const { data } = await api.post<PressureTestScenario[]>('/chat/pressure-test', {
-      company_id: companyId,
-      scenarios,
-    })
-    return data
+  // Models
+  getModels(): Promise<{ models: ModelInfo[] }> {
+    return api.get('/chat/models').then(r => r.data)
   },
 
-  /** 获取公司Agent分析上下文 */
-  async getCompanyContext(companyId: string): Promise<AgentCompanyContext> {
-    const { data } = await api.get<AgentCompanyContext>(`/chat/context/${companyId}`)
-    return data
+  // Reports
+  generateReport(companyId: string, material?: string): Promise<RiskReport> {
+    return api.post<RiskReport>('/chat/report', { company_id: companyId, material }).then(r => r.data)
+  },
+  generateMultiReport(companyId: string, materials: string[]): Promise<MultiReport> {
+    return api.post<MultiReport>('/chat/report/multi', { company_id: companyId, materials }).then(r => r.data)
+  },
+  shareReport(reportData: unknown): Promise<{ share_id: string; url: string }> {
+    return api.post('/chat/report/share', { report_data: reportData }).then(r => r.data)
+  },
+
+  // Dashboard
+  getDashboard(companyId?: string, tab = 'company'): Promise<DashboardData> {
+    return api.get('/chat/dashboard', { params: { company_id: companyId, tab } }).then(r => r.data)
+  },
+  getRecommended(companyId?: string): Promise<RecommendedQuestions> {
+    return api.get('/chat/recommended', { params: { company_id: companyId } }).then(r => r.data)
   },
 }

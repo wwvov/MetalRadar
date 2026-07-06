@@ -1,132 +1,135 @@
 import { useState, useCallback } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { agentService } from '@/services/agentService'
 import type {
   ChatMessageItem, ChatRequest,
-  RiskReport, PressureTestScenario, ScenarioInput,
+  RiskReport,
 } from '@/types/agent'
 
 let _msgId = 0
-function nextId() {
-  return `msg-${Date.now()}-${++_msgId}`
-}
+function nextId() { return `msg-${Date.now()}-${++_msgId}` }
 
-export function useAgent(companyId?: string) {
+// ─── Chat Hook ─────────────────────────────────────────────────
+
+export function useAgent(companyId?: string, sessionId?: string, model?: string) {
   const [messages, setMessages] = useState<ChatMessageItem[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
+  const qc = useQueryClient()
 
-  // 获取公司上下文
-  const contextQuery = useQuery({
-    queryKey: ['agent-context', companyId],
-    queryFn: () => agentService.getCompanyContext(companyId!),
-    enabled: !!companyId,
-    staleTime: 60_000,
-  })
-
-  // 发送消息
   const sendMessage = useCallback(async (message: string, scenario?: ChatRequest['scenario']) => {
-    const userMsg: ChatMessageItem = {
-      id: nextId(),
-      role: 'user',
-      content: message,
-      timestamp: new Date().toISOString(),
-    }
+    const userMsg: ChatMessageItem = { id: nextId(), role: 'user', content: message, timestamp: new Date().toISOString() }
     setMessages(prev => [...prev, userMsg])
     setIsProcessing(true)
 
-    // 构建历史
-    const history = messages.slice(-20).map(m => ({
-      role: m.role,
-      content: m.content,
-    }))
-
     try {
-      const response = await agentService.chat({
-        company_id: companyId,
-        message,
-        scenario,
-        history,
+      const resp = await agentService.chat({
+        company_id: companyId, message, scenario, session_id: sessionId, model,
+        history: messages.slice(-20).map(m => ({ role: m.role, content: m.content })),
       })
-
-      const assistantMsg: ChatMessageItem = {
-        id: nextId(),
-        role: 'assistant',
-        content: response.reply,
-        charts: response.charts,
-        riskScore: response.risk_score,
-        riskLevel: response.risk_level,
-        sources: response.sources,
+      const bot: ChatMessageItem = {
+        id: nextId(), role: 'assistant', content: resp.reply,
+        charts: resp.charts, riskScore: resp.risk_score,
+        riskLevel: resp.risk_level, sources: resp.sources,
         timestamp: new Date().toISOString(),
       }
-
-      setMessages(prev => [...prev, assistantMsg])
-      return assistantMsg
+      setMessages(prev => [...prev, bot])
+      qc.invalidateQueries({ queryKey: ['sessions'] })
+      return bot
     } catch (err: any) {
-      const errorMsg: ChatMessageItem = {
-        id: nextId(),
-        role: 'assistant',
-        content: `抱歉，分析服务暂时不可用：${err?.message || '未知错误'}。请稍后重试。`,
-        timestamp: new Date().toISOString(),
-      }
-      setMessages(prev => [...prev, errorMsg])
-      return errorMsg
+      const errMsg: ChatMessageItem = { id: nextId(), role: 'assistant',
+        content: `抱歉，服务不可用：${err?.message || '未知错误'}`, timestamp: new Date().toISOString() }
+      setMessages(prev => [...prev, errMsg])
+      return errMsg
     } finally {
       setIsProcessing(false)
     }
-  }, [companyId, messages])
+  }, [companyId, sessionId, model, messages, qc])
 
-  // 清空对话
-  const clearChat = useCallback(() => {
-    setMessages([])
-  }, [])
+  const clearChat = useCallback(() => setMessages([]), [])
 
-  return {
-    messages,
-    isProcessing,
-    sendMessage,
-    clearChat,
-    contextQuery,
-    setMessages,
-  }
+  return { messages, setMessages, isProcessing, sendMessage, clearChat }
 }
 
+// ─── Sessions Hook ─────────────────────────────────────────────
+
+export function useSessions() {
+  const qc = useQueryClient()
+  const query = useQuery({
+    queryKey: ['sessions'],
+    queryFn: async () => (await agentService.listSessions()).sessions,
+  })
+
+  const createMut = useMutation({
+    mutationFn: (title: string) => agentService.createSession(title),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['sessions'] }),
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => agentService.deleteSession(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['sessions'] }),
+  })
+
+  const renameMut = useMutation({
+    mutationFn: ({ id, title }: { id: string; title: string }) => agentService.renameSession(id, title),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['sessions'] }),
+  })
+
+  return { sessions: query.data || [], sessionsLoading: query.isLoading, createMut, deleteMut, renameMut }
+}
+
+export function useSessionDetail(sessionId?: string) {
+  return useQuery({
+    queryKey: ['session', sessionId],
+    queryFn: () => agentService.getSession(sessionId!),
+    enabled: !!sessionId,
+  })
+}
+
+// ─── Models Hook ───────────────────────────────────────────────
+
+export function useModels() {
+  return useQuery({
+    queryKey: ['models'],
+    queryFn: async () => (await agentService.getModels()).models,
+    staleTime: Infinity,
+  })
+}
+
+// ─── Report Hook ───────────────────────────────────────────────
 
 export function useReport() {
   const [report, setReport] = useState<RiskReport | null>(null)
-
-  const generateMutation = useMutation({
+  const genMut = useMutation({
     mutationFn: ({ companyId, material }: { companyId: string; material?: string }) =>
       agentService.generateReport(companyId, material),
-    onSuccess: (data) => {
-      setReport(data)
-    },
+    onSuccess: setReport,
   })
-
-  return {
-    report,
-    generateReport: generateMutation.mutate,
-    isGenerating: generateMutation.isPending,
-    error: generateMutation.error,
-    setReport,
-  }
+  return { report, generateReport: genMut.mutate, isGenerating: genMut.isPending, setReport }
 }
 
-
-export function usePressureTest() {
-  const [results, setResults] = useState<PressureTestScenario[] | null>(null)
-
-  const testMutation = useMutation({
-    mutationFn: ({ companyId, scenarios }: { companyId: string; scenarios: ScenarioInput[] }) =>
-      agentService.runPressureTest(companyId, scenarios),
-    onSuccess: (data) => {
-      setResults(data)
-    },
+export function useMultiReport() {
+  const mut = useMutation({
+    mutationFn: ({ companyId, materials }: { companyId: string; materials: string[] }) =>
+      agentService.generateMultiReport(companyId, materials),
   })
+  return { multiReport: mut.data, generateMulti: mut.mutate, isGenerating: mut.isPending }
+}
 
-  return {
-    results,
-    runTest: testMutation.mutate,
-    isRunning: testMutation.isPending,
-    setResults,
-  }
+// ─── Dashboard Hook ────────────────────────────────────────────
+
+export function useDashboard(companyId?: string, tab = 'company') {
+  return useQuery({
+    queryKey: ['dashboard', companyId, tab],
+    queryFn: () => agentService.getDashboard(companyId, tab),
+    enabled: !!companyId || tab === 'sentiment',
+    staleTime: 30_000,
+  })
+}
+
+export function useRecommended(companyId?: string) {
+  return useQuery({
+    queryKey: ['recommended', companyId],
+    queryFn: () => agentService.getRecommended(companyId),
+    staleTime: 60_000,
+  })
 }

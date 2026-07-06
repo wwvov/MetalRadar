@@ -20,6 +20,8 @@ class ChatRequest(BaseModel):
         None, description="分析场景：风险扫描 / 事件传导 / 自由问答"
     )
     history: Optional[list[ChatMessage]] = Field(None, description="历史对话（最多20轮）")
+    session_id: Optional[str] = Field(None, description="会话ID（用于持久化存储）")
+    model: Optional[str] = Field("glm-5.2", description="使用的模型")
 
 
 class ChartData(BaseModel):
