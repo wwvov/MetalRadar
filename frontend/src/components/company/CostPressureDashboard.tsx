@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -6,7 +6,6 @@ import { Slider } from '@/components/ui/slider'
 import { ErrorCard } from '@/components/news/ErrorCard'
 import { Gauge, AlertTriangle, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { companyService } from '@/services/companyService'
 import type { PressureData } from '@/types/futures'
 import type { CompanyMaterial } from '@/types/company'
 
@@ -45,12 +44,11 @@ export function CostPressureDashboard({
   companyId,
   allMaterials,
 }: CostPressureDashboardProps) {
-  // 本地成本占比状态 — key为material_name
+  // 本地成本占比状态 — key为material_name（仅用于前端展示，不持久化）
   const [costPctMap, setCostPctMap] = useState<Record<string, number>>({})
   const initializedRef = useRef(false)
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // 从后端数据初始化cost_pct
+  // 从后端数据初始化cost_pct（AI分析出的原始成本占比）
   useEffect(() => {
     if (initializedRef.current) return
     const materials = data?.materials
@@ -64,44 +62,28 @@ export function CostPressureDashboard({
     }
   }, [data])
 
-  // 重置初始化标记（数据刷新时重新加载）
+  // 重置初始化标记（切换公司时用新公司的数据重新初始化）
   useEffect(() => {
     initializedRef.current = false
   }, [companyId])
 
-  // 防抖持久化到后端
-  const debouncedSave = useCallback(() => {
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => {
-      // 合并当前所有材料：从 allMaterials 获取完整信息，cost_pct 用本地调整值
-      const updatedMaterials: CompanyMaterial[] = allMaterials.map((m) => ({
-        material_name: m.material_name,
-        cost_pct: costPctMap[m.material_name] ?? m.cost_pct ?? 0,
-        source: 'manual' as const,
-        direction: m.direction,
-        contract: m.contract,
-      }))
-      companyService.updatePortrait(companyId, { materials: updatedMaterials }).catch(() => {
-        // 静默失败，不影响交互
-      })
-    }, 2000)
-  }, [costPctMap, allMaterials, companyId])
-
-  // 清理定时器
-  useEffect(() => {
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    }
-  }, [])
-
+  // 滑块调整仅更新本地状态，不持久化（AI分析的成本占比仅在【我的关注】页手动编辑画像时才会保存）
   const handleCostPctChange = (materialName: string, value: number) => {
     setCostPctMap((prev) => ({ ...prev, [materialName]: value }))
-    debouncedSave()
   }
 
   // 计算加权影响
   const calcWeightedImpact = (changePct: number, costPct: number): number => {
     return Math.abs(changePct) * (costPct / 100)
+  }
+
+  // 基于加权影响计算压力等级（加权影响 = |涨跌幅| × 成本占比）
+  // 此函数使用本地滑块调整后的成本占比，而非后端持久化的值
+  const calcPressureLevel = (changePct: number, costPct: number): 'low' | 'medium' | 'high' => {
+    const impact = calcWeightedImpact(changePct, costPct)
+    if (impact >= 5) return 'high'
+    if (impact >= 1) return 'medium'
+    return 'low'
   }
 
   if (isLoading) {
@@ -177,11 +159,13 @@ export function CostPressureDashboard({
           const pressure = m.pressure
           if (!pressure) return null
 
-          const config = PRESSURE_CONFIG[pressure.pressure_level] || PRESSURE_CONFIG.low
           const changePct = pressure.change_pct || 0
           const absPct = Math.min(Math.abs(changePct), 25)
           const adjustedCostPct = costPctMap[m.material_name] ?? m.cost_pct ?? 0
           const weightedImpact = calcWeightedImpact(changePct, adjustedCostPct)
+          // 使用本地计算的压力等级（基于加权影响），而非后端仅基于涨跌幅的等级
+          const localPressureLevel = calcPressureLevel(changePct, adjustedCostPct)
+          const config = PRESSURE_CONFIG[localPressureLevel] || PRESSURE_CONFIG.low
 
           return (
             <div key={m.material_name} className="border-b border-slate-100 pb-4 last:border-0 last:pb-0">
@@ -278,9 +262,9 @@ export function CostPressureDashboard({
           <ol className="text-[10px] text-slate-400 space-y-1 list-decimal list-inside leading-relaxed">
             <li>基准价 = 财报报告期内期货均价（≥10个交易日）或 60日均价</li>
             <li>涨跌幅 = (当前价 − 基准价) / 基准价 × 100%</li>
-            <li>压力等级：|涨跌幅| &lt; 5% → 压力较小 | 5–15% → 中等压力 | ≥ 15% → 压力显著</li>
-            <li>加权影响 = |涨跌幅| × 成本占比 / 100 — 衡量该材料价格变化对公司总成本的实际冲击</li>
-            <li>成本占比可通过滑块按经验调整，调整后自动保存</li>
+            <li>加权影响 = |涨跌幅| × 成本占比 / 100 — 衡量该材料价格变化对公司总成本的实际冲击（单位：百分点）</li>
+            <li>压力等级基于加权影响：≥ 5pp → 压力显著 | ≥ 1pp → 中等压力 | &lt; 1pp → 压力较小</li>
+            <li>成本占比滑块仅用于动态展示压力变化，不会修改 AI 分析出的原始成本占比</li>
           </ol>
         </div>
       </div>

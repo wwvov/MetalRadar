@@ -507,6 +507,15 @@ def _derive_material_data(
     # --- pressure: 成本压力 ---
     pressure = calc_pressure(current_1y, cost_pct, calculated_base_price)
 
+    # --- YTD: 2026年以来涨跌幅 ---
+    ytd_change_pct = None
+    for i, date_str in enumerate(dates):
+        if date_str >= "2026-01-01":
+            ytd_start_price = closes[i]
+            if ytd_start_price and ytd_start_price != 0:
+                ytd_change_pct = round((closes[-1] - ytd_start_price) / ytd_start_price * 100, 2)
+            break
+
     return {
         "quote": quote,
         "percentile_1y": percentile_1y,
@@ -514,6 +523,7 @@ def _derive_material_data(
         "history_3m": history_3m,
         "pressure": pressure,
         "base_price": calculated_base_price,
+        "ytd_change_pct": ytd_change_pct,
     }
 
 
@@ -606,6 +616,7 @@ def get_dashboard_data(db, company_id: str) -> dict:
             "percentile_2y": derived["percentile_2y"],
             "history_3m": derived["history_3m"],
             "pressure": derived["pressure"],
+            "ytd_change_pct": derived.get("ytd_change_pct"),
         })
 
     # 持久化自动计算的 base_price
@@ -706,6 +717,7 @@ def get_overview_data(db) -> dict:
             "percentile_1y": percentile_1y,
             "percentile_2y": percentile_2y,
             "history_3m": history_3m,
+            "ytd_change_pct": derived.get("ytd_change_pct") if symbol and symbol in symbol_to_df and not symbol_to_df[symbol].empty else None,
             "companies": metal_companies[name],
             "total_companies": len(metal_companies[name]),
         })
@@ -753,3 +765,47 @@ def prefetch_all_symbols(db) -> dict:
     success_count = sum(1 for v in results.values() if v)
     logger.info(f"预热完成: {success_count}/{len(symbols)} 成功")
     return results
+
+
+def refresh_all_known_futures(db) -> dict:
+    """后台刷新所有已知品种的期货数据 — 仅供守护线程周期性调用
+
+    与 prefetch_all_symbols 不同，此函数会强制使缓存失效后重新拉取，
+    确保在缓存TTL窗口内也能获取到最新的交易数据。
+
+    Returns:
+        {success: int, failed: int, symbols: list}
+    """
+    from app.models.company import CompanyMaterial
+
+    materials = db.query(CompanyMaterial).all()
+    symbols = set()
+    for m in materials:
+        symbol = _get_symbol(m.material_name, m.contract or "")
+        if symbol:
+            symbols.add(symbol)
+
+    if not symbols:
+        return {"success": 0, "failed": 0, "symbols": []}
+
+    success = 0
+    failed = 0
+    for symbol in sorted(symbols):
+        try:
+            # 检查缓存是否过期，未过期则跳过（避免不必要的API调用）
+            cached = _read_cache(symbol)
+            if cached and "kline" in cached:
+                logger.debug(f"期货 {symbol} 缓存未过期，跳过刷新")
+                success += 1
+                continue
+
+            _fetch_kline(symbol)
+            success += 1
+            logger.info(f"后台刷新期货成功: {symbol}")
+        except Exception as e:
+            failed += 1
+            logger.warning(f"后台刷新期货失败: {symbol}: {e}")
+
+    if success > 0 or failed > 0:
+        logger.info(f"后台期货刷新完成: {success} 成功, {failed} 失败")
+    return {"success": success, "failed": failed, "symbols": sorted(symbols)}

@@ -11,6 +11,7 @@ export function useStockKline(
     queryFn: () => stockService.getKline(code!, frequency),
     enabled: !!code,
     staleTime: 60 * 60 * 1000, // 1小时缓存（日线每天只更新一次）
+    refetchInterval: 15 * 60 * 1000, // 每15分钟自动刷新（盘中可能有新交易日数据）
   })
 }
 
@@ -19,7 +20,8 @@ export function useStockInfo(code: string | undefined) {
     queryKey: ['stock-info', code],
     queryFn: () => stockService.getStockInfo(code!),
     enabled: !!code,
-    staleTime: 24 * 60 * 60 * 1000, // 1天缓存
+    staleTime: 5 * 60 * 1000, // 5分钟缓存（市值/PE/PB盘中实时变化）
+    refetchInterval: 5 * 60 * 1000, // 每5分钟自动刷新
   })
 }
 

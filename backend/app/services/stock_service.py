@@ -25,8 +25,23 @@ from app.services._scrape_control import (
 logger = logging.getLogger(__name__)
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", ".cache")
+# 静态 TTL 常量（兜底值，实际使用 _get_kline_cache_ttl / _get_info_cache_ttl）
 STOCK_CACHE_TTL = 3600       # 股票K线缓存1小时（日线每天只更新一次）
-STOCK_INFO_CACHE_TTL = 86400  # 公司信息缓存1天
+STOCK_INFO_CACHE_TTL = 3600  # 公司信息缓存1小时（市值/PE/PB盘中实时变化）
+
+# 动态 TTL（交易时段更短）
+_KLINE_CACHE_TTL_TRADING = 900    # 交易时段：15分钟（收盘后可能有新日线数据）
+_KLINE_CACHE_TTL_IDLE = 3600      # 非交易时段：1小时
+_INFO_CACHE_TTL_TRADING = 300     # 交易时段：5分钟（市值盘中实时变化）
+_INFO_CACHE_TTL_IDLE = 3600       # 非交易时段：1小时
+
+
+def _get_kline_cache_ttl() -> int:
+    return _KLINE_CACHE_TTL_TRADING if _is_trading_hours() else _KLINE_CACHE_TTL_IDLE
+
+
+def _get_info_cache_ttl() -> int:
+    return _INFO_CACHE_TTL_TRADING if _is_trading_hours() else _INFO_CACHE_TTL_IDLE
 
 
 def _ensure_cache_dir():
@@ -248,16 +263,17 @@ def get_stock_kline(code: str, frequency: str = "daily", start_date: str = "", e
     """
     # 缓存键基于日线（周/月从日线派生）
     daily_cache_key = f"kline_{code}_daily_{adjust}"
+    kline_ttl = _get_kline_cache_ttl()
 
     # 检查日线缓存
-    cached_daily = _read_cache(daily_cache_key, STOCK_CACHE_TTL)
+    cached_daily = _read_cache(daily_cache_key, kline_ttl)
     if cached_daily and "data" in cached_daily:
         daily_data = cached_daily["data"]
         logger.info(f"股票 {code} 日线命中缓存，{len(daily_data)} 条")
     else:
         # 需要获取日线数据
         with _acquire_lock():
-            cached_daily = _read_cache(daily_cache_key, STOCK_CACHE_TTL)
+            cached_daily = _read_cache(daily_cache_key, kline_ttl)
             if cached_daily and "data" in cached_daily:
                 daily_data = cached_daily["data"]
             else:
@@ -355,12 +371,13 @@ def get_stock_info(code: str) -> dict:
         {total_market_cap, circulating_market_cap, industry, total_shares, ...}
     """
     cache_key = f"info_{code}"
-    cached = _read_cache(cache_key, STOCK_INFO_CACHE_TTL)
+    info_ttl = _get_info_cache_ttl()
+    cached = _read_cache(cache_key, info_ttl)
     if cached and "data" in cached:
         return cached["data"]
 
     with _acquire_lock():
-        cached = _read_cache(cache_key, STOCK_INFO_CACHE_TTL)
+        cached = _read_cache(cache_key, info_ttl)
         if cached and "data" in cached:
             return cached["data"]
 
@@ -434,26 +451,115 @@ def get_stock_info(code: str) -> dict:
         return info
 
 
-# 全市场实时行情缓存（跨股票共享，5分钟TTL）
-_SPOT_CACHE_TTL = 300  # 5分钟
+# 全市场实时行情缓存（跨股票共享，交易时段1分钟/非交易时段5分钟TTL）
+_SPOT_CACHE_TTL_TRADING = 60    # 交易时段：1分钟（盘中实时变化）
+_SPOT_CACHE_TTL_IDLE = 300      # 非交易时段：5分钟
 _spot_cache: dict | None = None
+
+# 后台刷新时间戳（供前端判断数据新鲜度）
+_last_spot_refresh_time: float = 0.0
+_last_futures_refresh_time: float = 0.0
+
+
+def _is_trading_hours() -> bool:
+    """判断当前是否在A股交易时段（工作日 9:00–16:00 北京时间）"""
+    from datetime import datetime, timezone, timedelta
+    tz = timezone(timedelta(hours=8))
+    now = datetime.now(tz)
+    if now.weekday() >= 5:
+        return False
+    trade_start = now.replace(hour=9, minute=0, second=0, microsecond=0)
+    trade_end = now.replace(hour=16, minute=0, second=0, microsecond=0)
+    return trade_start <= now <= trade_end
+
+
+def _get_spot_cache_ttl() -> int:
+    """动态缓存TTL：交易时段1分钟，非交易时段5分钟"""
+    return _SPOT_CACHE_TTL_TRADING if _is_trading_hours() else _SPOT_CACHE_TTL_IDLE
+
+
+def get_last_refresh_times() -> dict:
+    """返回各数据源的最后刷新时间戳"""
+    return {
+        "spot_market": _last_spot_refresh_time if _last_spot_refresh_time > 0 else None,
+        "futures": _last_futures_refresh_time if _last_futures_refresh_time > 0 else None,
+    }
+
+
+def refresh_market_data(db=None) -> dict:
+    """后台刷新市场数据 — 原子操作：仅在缓存自然过期时才触发 akshare 调用
+
+    与旧版的关键区别：
+    - 不主动 invalidate 缓存（避免销毁有效数据）
+    - 依赖缓存自身的 TTL 过期机制驱动刷新
+    - 调用失败时保留旧缓存（不丢数据）
+    - 不使用 retry_with_backoff（后台静默失败即可，下次周期再试）
+
+    供后台守护线程周期性调用。
+
+    Returns:
+        {spot_ok: bool, spot_count: int, spot_refreshed: bool, futures_count: int}
+    """
+    global _last_spot_refresh_time, _last_futures_refresh_time
+    result = {"spot_ok": False, "spot_count": 0, "spot_refreshed": False, "futures_count": 0}
+
+    # 刷新全市场行情（仅当缓存过期时才真正调用 akshare）
+    try:
+        had_cache = _spot_cache is not None
+        df = _get_spot_market_cache()  # 缓存未过期则立即返回，无 akshare 调用
+        result["spot_ok"] = True
+        result["spot_count"] = len(df)
+        result["spot_refreshed"] = not had_cache or _spot_cache is None or _spot_cache.get("_ts", 0) > _last_spot_refresh_time
+        if result["spot_refreshed"]:
+            _last_spot_refresh_time = time.time()
+            logger.info(f"后台刷新: 全市场行情 {len(df)} 只股票（缓存已过期，已更新）")
+    except Exception as e:
+        # 关键：失败时保留旧缓存，不丢数据
+        logger.warning(f"后台刷新全市场行情失败（旧缓存仍可用）: {e}")
+
+    # 期货数据（不在后台频繁刷新——每个品种一次 akshare 调用成本太高）
+    # 期货依赖前端 5 分钟轮询 + 后端 5 分钟 TTL 自然过期刷新
+    if db is not None and _is_trading_hours():
+        try:
+            from app.services.futures_service import refresh_all_known_futures
+            futures_result = refresh_all_known_futures(db)
+            result["futures_count"] = futures_result.get("success", 0)
+            if futures_result.get("success", 0) > 0:
+                _last_futures_refresh_time = time.time()
+        except Exception as e:
+            logger.warning(f"后台刷新期货数据失败: {e}")
+
+    return result
 
 
 def _get_spot_market_cache():
-    """获取全市场A股实时行情（缓存5分钟，跨股票共享）"""
+    """获取全市场A股实时行情（动态TTL：交易时段1分钟/非交易5分钟，跨股票共享）
+
+    缓存未过期时零开销直接返回。
+    缓存过期时单次尝试 akshare（无重试），失败则保留旧缓存 + 抛异常。
+    """
     global _spot_cache
     now = time.time()
-    if _spot_cache and (now - _spot_cache.get("_ts", 0) < _SPOT_CACHE_TTL):
+    ttl = _get_spot_cache_ttl()
+    if _spot_cache and (now - _spot_cache.get("_ts", 0) < ttl):
         return _spot_cache["df"]
 
     import akshare as ak
 
-    def _fetch_spot():
-        return ak.stock_zh_a_spot_em()
+    # 单次尝试，不重试 — 避免后台线程连续重试触发反爬
+    # 如果失败，旧缓存仍保留，等下一个 TTL 周期再试
+    _cooldown()
+    try:
+        df = ak.stock_zh_a_spot_em()
+    except Exception as e:
+        logger.warning(f"全市场实时行情获取失败（旧缓存仍可用）: {e}")
+        if _spot_cache is not None:
+            return _spot_cache["df"]  # 返回旧缓存
+        raise  # 无旧缓存时向上抛异常
 
-    df = _retry_with_backoff(_fetch_spot, max_retries=2, label="全市场实时行情")
+    _mark_fetch_time()
     _spot_cache = {"df": df, "_ts": now}
-    logger.info(f"全市场实时行情获取成功: {len(df)} 只股票")
+    logger.info(f"全市场实时行情获取成功: {len(df)} 只股票 (TTL={ttl}s)")
     return df
 
 

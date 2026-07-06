@@ -256,11 +256,11 @@ function PercentileThermometer({
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
         <span className="text-[12px] font-medium text-slate-700">
-          当前价处于近{period === 252 ? '1' : '2'}年 {pct}% 分位
+          当前价处于过去{period === 252 ? '365' : '730'}天 {pct}% 分位
         </span>
         <div className="flex gap-0.5">
-          <Button variant="ghost" size="sm" className={cn('h-5 text-[10px] px-1.5', period === 252 && 'bg-amber-100 text-amber-700')} onClick={onTogglePeriod} disabled={period === 252}>近1年</Button>
-          <Button variant="ghost" size="sm" className={cn('h-5 text-[10px] px-1.5', period === 504 && 'bg-amber-100 text-amber-700')} onClick={onTogglePeriod} disabled={period === 504}>近2年</Button>
+          <Button variant="ghost" size="sm" className={cn('h-5 text-[10px] px-1.5', period === 252 && 'bg-amber-100 text-amber-700')} onClick={onTogglePeriod} disabled={period === 252}>过去365天</Button>
+          <Button variant="ghost" size="sm" className={cn('h-5 text-[10px] px-1.5', period === 504 && 'bg-amber-100 text-amber-700')} onClick={onTogglePeriod} disabled={period === 504}>过去730天</Button>
         </div>
       </div>
       <div className="relative h-4 rounded-full overflow-hidden" style={{ background: 'linear-gradient(to right, #10b981, #eab308, #f97316, #ef4444)' }}>
@@ -641,6 +641,21 @@ export function MetalPriceDashboard({ follows, className }: Props) {
                   />
                 )}
 
+                {/* 2026年以来涨跌幅 */}
+                {activeOverviewMetal.ytd_change_pct != null && (
+                  <div className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
+                    <span className="text-[12px] font-medium text-slate-600">2026年以来</span>
+                    <span className={cn(
+                      'text-[13px] font-semibold tabular-nums',
+                      activeOverviewMetal.ytd_change_pct > 0 ? 'text-rose-600' :
+                      activeOverviewMetal.ytd_change_pct < 0 ? 'text-emerald-600' :
+                      'text-slate-500',
+                    )}>
+                      {activeOverviewMetal.ytd_change_pct > 0 ? '+' : ''}{activeOverviewMetal.ytd_change_pct}%
+                    </span>
+                  </div>
+                )}
+
                 {/* 走势图 */}
                 {activeOverviewMetal.history_3m.length > 0 && (
                   <div className="space-y-1">
@@ -731,6 +746,21 @@ export function MetalPriceDashboard({ follows, className }: Props) {
                       onTogglePeriod={() => setPercentilePeriod(p => p === 252 ? 504 : 252)}
                       unit={activeMaterial.unit}
                     />
+                  )}
+
+                  {/* 2026年以来涨跌幅 */}
+                  {activeMaterial.ytd_change_pct != null && (
+                    <div className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
+                      <span className="text-[12px] font-medium text-slate-600">2026年以来</span>
+                      <span className={cn(
+                        'text-[13px] font-semibold tabular-nums',
+                        activeMaterial.ytd_change_pct > 0 ? 'text-rose-600' :
+                        activeMaterial.ytd_change_pct < 0 ? 'text-emerald-600' :
+                        'text-slate-500',
+                      )}>
+                        {activeMaterial.ytd_change_pct > 0 ? '+' : ''}{activeMaterial.ytd_change_pct}%
+                      </span>
+                    </div>
                   )}
 
                   {/* 近3月走势 */}

@@ -11,6 +11,7 @@ import {
   useDivergence,
 } from '@/hooks/useStock'
 import { useFuturesDashboard } from '@/hooks/useFutures'
+import { useMarketStatus } from '@/hooks/useMarketStatus'
 import { CompanyHeader } from '@/components/company/CompanyHeader'
 import { StockKlineChart } from '@/components/company/StockKlineChart'
 import { FuturesMiniChart } from '@/components/company/FuturesMiniChart'
@@ -21,7 +22,7 @@ import { ReportUpload } from '@/components/company/ReportUpload'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorCard } from '@/components/news/ErrorCard'
-import { Plus, Building2 } from 'lucide-react'
+import { Plus, Building2, Clock, RefreshCw } from 'lucide-react'
 
 type KlineFrequency = 'daily' | 'weekly' | 'monthly'
 
@@ -61,6 +62,7 @@ export default function CompanyPage() {
   const costPressureQuery = useCostPressure(selectedId || undefined)
   const divergenceQuery = useDivergence(selectedId || undefined)
   const futuresQuery = useFuturesDashboard(selectedId || null)
+  const marketStatus = useMarketStatus()
 
   const company = companyQuery.data
   const isLoading = companyQuery.isLoading
@@ -138,6 +140,35 @@ export default function CompanyPage() {
         stockInfo={stockInfoQuery.data}
         financialData={financialsQuery.data}
       />
+
+      {/* 数据新鲜度指示器 */}
+      <div className="flex items-center gap-4 text-[11px] text-slate-400">
+        <div className="flex items-center gap-1.5">
+          <Clock className="w-3 h-3" />
+          <span>行情数据更新：</span>
+          {marketStatus.data?.spot_market_last_refresh ? (
+            <span className="text-slate-600 font-medium">
+              {marketStatus.data.spot_market_last_refresh}
+            </span>
+          ) : (
+            <span className="text-slate-400">获取中...</span>
+          )}
+        </div>
+        {marketStatus.data?.trading_hours && (
+          <span className="text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded text-[10px] font-medium">
+            交易时段 · 自动刷新中
+          </span>
+        )}
+        <button
+          className="flex items-center gap-1 text-slate-400 hover:text-slate-600 transition-colors ml-auto disabled:opacity-50"
+          onClick={() => marketStatus.forceRefresh.mutate()}
+          disabled={marketStatus.forceRefresh.isPending}
+          title="手动刷新市场数据"
+        >
+          <RefreshCw className={`w-3 h-3 ${marketStatus.forceRefresh.isPending ? 'animate-spin' : ''}`} />
+          {marketStatus.forceRefresh.isPending ? '刷新中...' : '刷新'}
+        </button>
+      </div>
 
       {/* ===== 分区一：市值走势 ===== */}
       <div className="space-y-6">

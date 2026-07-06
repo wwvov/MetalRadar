@@ -54,6 +54,7 @@ export interface DashboardMaterial {
   percentile_2y: PricePercentile | null
   history_3m: { date: string; close: number }[]
   pressure: PressureData | null
+  ytd_change_pct: number | null
 }
 
 export interface DashboardData {
@@ -81,6 +82,7 @@ export interface OverviewMetal {
   percentile_1y: PricePercentile | null
   percentile_2y: PricePercentile | null
   history_3m: { date: string; close: number }[]
+  ytd_change_pct: number | null
   companies: {
     company_id: string
     company_name: string
