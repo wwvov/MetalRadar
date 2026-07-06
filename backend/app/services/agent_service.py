@@ -38,9 +38,8 @@ def _run_with_timeout(fn, timeout_secs: float, default=None):
 
 
 AVAILABLE_MODELS = {
-    "glm-5.2": "GLM-5.2 (通用)",
-    "glm-4.7": "GLM-4.7 (快速)",
-    "glm-4.5": "GLM-4.5 (经典)",
+    "deepseek-v4-flash": "DeepSeek-V4 Flash (推荐)",
+    "deepseek-v4-pro": "DeepSeek-V4 Pro (推理增强)",
 }
 
 AGENT_SYSTEM_PROMPT = """你是一位专业的金融原材料风险分析助手 — MRI (Material Risk Intelligence) Agent。
@@ -233,7 +232,7 @@ def _get_company_context(company_id: str) -> dict:
 def process_chat(
     company_id: Optional[str], message: str,
     scenario: Optional[str] = None, history: Optional[list[dict]] = None,
-    session_id: Optional[str] = None, model: str = "glm-5.2",
+    session_id: Optional[str] = None, model: str = "deepseek-v4-flash",
 ) -> ChatResponse:
     """处理用户消息"""
     client = _get_client(model)
@@ -297,20 +296,19 @@ def process_chat(
     risk_result = None
     if client:
         def _call_llm():
-            actual_model = settings.LLM_MODEL if model == "glm-5.2" else model
             return client.chat.completions.create(
-                model=actual_model, messages=messages,
-                temperature=0.3, max_tokens=1200, timeout=5,
+                model=model, messages=messages,
+                temperature=0.3, max_tokens=2000, timeout=20,
             )
 
         executor = ThreadPoolExecutor(max_workers=1)
         try:
             future = executor.submit(_call_llm)
-            response = future.result(timeout=7)
+            response = future.result(timeout=25)
             reply_text = response.choices[0].message.content or ""
         except FuturesTimeoutError:
             logger.error("LLM call hard timeout")
-            reply_text = "AI分析服务响应超时（7秒）。可能原因：\n1. 当前网络连接较慢\n2. LLM API服务端繁忙/限流\n3. API Key或模型配置不正确\n\n请检查 `backend/.env` 中的 LLM_BASE_URL 和 LLM_MODEL 配置。"
+            reply_text = "AI分析服务响应超时（25秒）。请检查网络或API配置。"
         except Exception as e:
             logger.error(f"LLM error: {e}")
             err_msg = str(e)
@@ -381,7 +379,7 @@ def _get_fallback_reply(company_ctx: dict, message: str, scenario: str) -> str:
 
 # ─── Session Management ─────────────────────────────────────────
 
-def create_session(title: str = "新对话", model: str = "glm-5.2") -> dict:
+def create_session(title: str = "新对话", model: str = "deepseek-v4-flash") -> dict:
     db = SessionLocal()
     try:
         session = ChatSession(title=title, model=model)

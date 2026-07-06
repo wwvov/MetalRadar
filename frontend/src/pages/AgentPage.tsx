@@ -581,7 +581,7 @@ export default function AgentPage() {
 
   const [activeSessionId, setActiveSessionId] = useState<string>('')
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('')
-  const [selectedModel, setSelectedModel] = useState('glm-5.2')
+  const [selectedModel, setSelectedModel] = useState('deepseek-v4-flash')
   const [activeScenario, setActiveScenario] = useState<string>('free_qa')
   const [inputValue, setInputValue] = useState('')
   const [showRightPanel, setShowRightPanel] = useState(true)

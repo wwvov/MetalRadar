@@ -21,7 +21,7 @@ class ChatRequest(BaseModel):
     )
     history: Optional[list[ChatMessage]] = Field(None, description="历史对话（最多20轮）")
     session_id: Optional[str] = Field(None, description="会话ID（用于持久化存储）")
-    model: Optional[str] = Field("glm-5.2", description="使用的模型")
+    model: Optional[str] = Field("deepseek-v4-flash", description="使用的模型")
 
 
 class ChartData(BaseModel):

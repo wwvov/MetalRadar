@@ -26,7 +26,7 @@ def chat(request: ChatRequest):
         return process_chat(
             company_id=request.company_id, message=request.message,
             scenario=request.scenario, history=history,
-            session_id=request.session_id, model=request.model or "glm-5.2",
+            session_id=request.session_id, model=request.model or "deepseek-v4-flash",
         )
     except Exception as e:
         logger.error(f"Chat error: {e}", exc_info=True)
