@@ -11,7 +11,7 @@ function nextId() { return `msg-${Date.now()}-${++_msgId}` }
 
 // ─── Chat Hook ─────────────────────────────────────────────────
 
-export function useAgent(companyId?: string, sessionId?: string, model?: string) {
+export function useAgent(companyId?: string, companyIds?: string[], sessionId?: string, model?: string) {
   const [messages, setMessages] = useState<ChatMessageItem[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
   const qc = useQueryClient()
@@ -23,7 +23,8 @@ export function useAgent(companyId?: string, sessionId?: string, model?: string)
 
     try {
       const resp = await agentService.chat({
-        company_id: companyId, message, scenario, session_id: sessionId, model,
+        company_id: companyId, company_ids: companyIds,
+        message, scenario, session_id: sessionId, model,
         history: messages.slice(-20).map(m => ({ role: m.role, content: m.content })),
       })
       const bot: ChatMessageItem = {
@@ -43,7 +44,7 @@ export function useAgent(companyId?: string, sessionId?: string, model?: string)
     } finally {
       setIsProcessing(false)
     }
-  }, [companyId, sessionId, model, messages, qc])
+  }, [companyId, companyIds, sessionId, model, messages, qc])
 
   const clearChat = useCallback(() => setMessages([]), [])
 
@@ -97,14 +98,15 @@ export function useModels() {
 
 // ─── Report Hook ───────────────────────────────────────────────
 
-export function useReport() {
+export function useReport(onError?: (err: Error) => void) {
   const [report, setReport] = useState<RiskReport | null>(null)
   const genMut = useMutation({
-    mutationFn: ({ companyId, material }: { companyId: string; material?: string }) =>
-      agentService.generateReport(companyId, material),
+    mutationFn: ({ companyIds, material, conversation_context, materialNames }: { companyIds?: string[]; material?: string; conversation_context?: string; materialNames?: string[] }) =>
+      agentService.generateReport(companyIds, material, conversation_context, materialNames),
     onSuccess: setReport,
+    onError: (err) => onError?.(err as Error),
   })
-  return { report, generateReport: genMut.mutate, isGenerating: genMut.isPending, setReport }
+  return { report, generateReport: genMut.mutate, isGenerating: genMut.isPending, setReport, reportError: genMut.error }
 }
 
 export function useMultiReport() {
@@ -117,19 +119,19 @@ export function useMultiReport() {
 
 // ─── Dashboard Hook ────────────────────────────────────────────
 
-export function useDashboard(companyId?: string, tab = 'company') {
+export function useDashboard(companyId?: string, companyIds?: string[], tab = 'company', message?: string, materials?: string[]) {
   return useQuery({
-    queryKey: ['dashboard', companyId, tab],
-    queryFn: () => agentService.getDashboard(companyId, tab),
-    enabled: !!companyId || tab === 'sentiment',
+    queryKey: ['dashboard', companyId, companyIds, tab, message, materials],
+    queryFn: () => agentService.getDashboard(companyId, companyIds, tab, message, materials),
+    enabled: !!companyId || (companyIds && companyIds.length > 0) || tab === 'sentiment' || tab === 'metal',
     staleTime: 30_000,
   })
 }
 
-export function useRecommended(companyId?: string) {
+export function useRecommended(companyId?: string, companyIds?: string[], message?: string) {
   return useQuery({
-    queryKey: ['recommended', companyId],
-    queryFn: () => agentService.getRecommended(companyId),
+    queryKey: ['recommended', companyId, companyIds, message],
+    queryFn: () => agentService.getRecommended(companyId, companyIds, message),
     staleTime: 60_000,
   })
 }

@@ -81,7 +81,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # 启动后端服务（默认 http://localhost:8000）
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --port 8000
 ```
 
 ### 4. 启动前端

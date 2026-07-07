@@ -20,7 +20,7 @@ class ChatSession(Base):
                 default=lambda: str(uuid.uuid4()),
                 comment="会话ID")
     title = Column(String(100), default="新对话", comment="会话标题")
-    model = Column(String(50), default="glm-5.2", comment="使用的模型")
+    model = Column(String(50), default="deepseek-v4-flash", comment="使用的模型")
     created_at = Column(DateTime, default=_now, comment="创建时间")
     updated_at = Column(DateTime, default=_now, onupdate=_now, comment="最后活跃时间")
     company_id = Column(String(20), comment="关联公司ID（可为空）")

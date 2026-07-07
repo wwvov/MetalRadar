@@ -12,7 +12,7 @@ export const agentService = {
   },
 
   // Sessions
-  createSession(title = '新对话', model = 'glm-5.2'): Promise<ChatSessionItem> {
+  createSession(title = '新对话', model = 'deepseek-v4-flash'): Promise<ChatSessionItem> {
     return api.post('/chat/sessions', { title, model }).then(r => r.data)
   },
   listSessions(): Promise<{ sessions: ChatSessionItem[] }> {
@@ -34,8 +34,8 @@ export const agentService = {
   },
 
   // Reports
-  generateReport(companyId: string, material?: string): Promise<RiskReport> {
-    return api.post<RiskReport>('/chat/report', { company_id: companyId, material }).then(r => r.data)
+  generateReport(companyIds?: string[], material?: string, conversation_context?: string, materialNames?: string[]): Promise<RiskReport> {
+    return api.post<RiskReport>('/chat/report', { company_ids: companyIds, material, conversation_context, material_names: materialNames }).then(r => r.data)
   },
   generateMultiReport(companyId: string, materials: string[]): Promise<MultiReport> {
     return api.post<MultiReport>('/chat/report/multi', { company_id: companyId, materials }).then(r => r.data)
@@ -44,11 +44,28 @@ export const agentService = {
     return api.post('/chat/report/share', { report_data: reportData }).then(r => r.data)
   },
 
-  // Dashboard
-  getDashboard(companyId?: string, tab = 'company'): Promise<DashboardData> {
-    return api.get('/chat/dashboard', { params: { company_id: companyId, tab } }).then(r => r.data)
+  generatePDF(companyId: string, material?: string): Promise<Blob> {
+    return api.post('/chat/report/pdf', { company_id: companyId, material }, {
+      responseType: 'blob',
+      headers: { Accept: 'application/pdf' },
+    }).then(r => r.data)
   },
-  getRecommended(companyId?: string): Promise<RecommendedQuestions> {
-    return api.get('/chat/recommended', { params: { company_id: companyId } }).then(r => r.data)
+
+  // Companies
+  getAllMetalCompanies(): Promise<{ ok: boolean; data: { id: string; name: string; code: string; industry: string }[] }> {
+    return api.get('/companies/with-materials').then(r => r.data)
+  },
+  getDashboard(companyId?: string, companyIds?: string[], tab = 'company', message?: string, materials?: string[]): Promise<DashboardData> {
+    const params: Record<string, unknown> = { tab, message }
+    if (companyId) params.company_id = companyId
+    if (companyIds && companyIds.length > 0) params.company_ids = companyIds.join(',')
+    if (materials && materials.length > 0) params.materials = materials.join(',')
+    return api.get('/chat/dashboard', { params }).then(r => r.data)
+  },
+  getRecommended(companyId?: string, companyIds?: string[], message?: string): Promise<RecommendedQuestions> {
+    const params: Record<string, unknown> = { message }
+    if (companyId) params.company_id = companyId
+    if (companyIds && companyIds.length > 0) params.company_ids = companyIds.join(',')
+    return api.get('/chat/recommended', { params }).then(r => r.data)
   },
 }

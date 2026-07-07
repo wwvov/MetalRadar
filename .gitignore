@@ -35,3 +35,16 @@ Thumbs.db
 .env
 .env.local
 .env.production
+
+# Generated docs (keep in git, these are deliverables)
+# *.docx
+
+# Temp / logs
+*.log
+test_response.json
+screenshot-*.png
+~$*.docx
+backend/test_output/
+
+# Project AI data (not for git, include in zip manually)
+.workbuddy/

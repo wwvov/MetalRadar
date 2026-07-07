@@ -10,6 +10,7 @@ export const CHART_COLORS = {
   gray: '#6b7280',
   primary: '#166534',    // 深绿色主色 (Agent)
   green: '#16a34a',      // 翠绿
+  palette: ['#166534', '#3b82f6', '#ef4444', '#eab308', '#8b5cf6', '#14b8a6', '#f97316', '#64748b'],
 }
 
 export const BASE_CHART_OPTION: Partial<EChartsOption> = {

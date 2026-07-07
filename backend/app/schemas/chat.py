@@ -14,7 +14,8 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     """聊天请求"""
-    company_id: Optional[str] = Field(None, description="当前选中的公司ID")
+    company_id: Optional[str] = Field(None, description="当前选中的公司ID（单选，兼容旧版）")
+    company_ids: Optional[list[str]] = Field(None, description="多公司对比分析（与company_id二选一）")
     message: str = Field(..., min_length=1, max_length=4000, description="用户输入")
     scenario: Optional[Literal["risk_scan", "event_impact", "free_qa"]] = Field(
         None, description="分析场景：风险扫描 / 事件传导 / 自由问答"
@@ -24,9 +25,17 @@ class ChatRequest(BaseModel):
     model: Optional[str] = Field("deepseek-v4-flash", description="使用的模型")
 
 
+class EntityExtract(BaseModel):
+    """从用户消息中提取的实体"""
+    companies: list[str] = Field(default_factory=list, description="提及的公司名或股票代码")
+    materials: list[str] = Field(default_factory=list, description="提及的金属/原材料品种")
+    topics: list[str] = Field(default_factory=list, description="提及的主题/新闻关键词")
+    intent: Optional[str] = Field(None, description="意图：company/metal/sentiment/news")
+
+
 class ChartData(BaseModel):
     """内嵌图表"""
-    type: Literal["line", "bar", "gauge", "pie", "flow"]
+    type: Literal["line", "bar", "gauge", "pie", "flow", "score_bar"]
     title: Optional[str] = None
     data: dict = Field(default_factory=dict)
 
@@ -50,9 +59,13 @@ class ChatResponse(BaseModel):
 
 class ReportGenerateRequest(BaseModel):
     """生成报告请求"""
-    company_id: str = Field(..., description="目标公司ID")
+    company_id: Optional[str] = Field(None, description="目标公司ID（单公司模式，兼容旧版）")
+    company_ids: Optional[list[str]] = Field(None, description="多公司ID列表（多公司对比模式）")
     material: Optional[str] = Field(None, description="指定物料品种（可选，默认选最高风险品种）")
+    materials: Optional[list[str]] = Field(None, description="多个物料品种（用于对比分析）")
+    material_names: Optional[list[str]] = Field(None, description="金属品种列表（纯金属报告模式，无需公司ID）")
     conversation_id: Optional[str] = Field(None, description="引用的对话ID")
+    conversation_context: Optional[str] = Field(None, description="用户与Agent的聊天上下文摘要")
 
 
 class ScenarioItem(BaseModel):
@@ -109,12 +122,25 @@ class RiskReport(BaseModel):
     company_code: str
     material_name: str
 
+    # 多公司支持
+    company_names: list[str] = Field(default_factory=list, description="报告中覆盖的全部公司名")
+    company_profiles: Optional[list[dict]] = Field(None, description="多公司概况列表")
+
     # Executive Summary
     risk_score: float
     risk_level: str  # "低风险" / "中等风险" / "高风险"
     summary: str
     current_price: Optional[float] = None
     price_change_24h: Optional[float] = None
+
+    # 金属行情支持（纯金属/多金属模式）
+    metal_quotes: Optional[list[dict]] = Field(None, description="所选金属品种的期货行情")
+    metal_exposures: Optional[list[dict]] = Field(None, description="各金属与关联公司的成本暴露关系")
+    material_names: Optional[list[str]] = Field(None, description="报告中覆盖的全部金属品种")
+
+    # 公司概况
+    company_profile: Optional[str] = None
+    cost_structure: Optional[list[dict]] = None
 
     # 推理链路
     reasoning: list[ReasoningStep]
@@ -125,6 +151,9 @@ class RiskReport(BaseModel):
     # 风险因子
     factors: list[RiskFactor]
 
+    # 风险事件
+    risk_events: Optional[list[dict]] = None
+
     # 情景模拟
     scenarios: Optional[list[PressureTestScenario]] = None
 
@@ -133,6 +162,9 @@ class RiskReport(BaseModel):
 
     # 图表数据（前端渲染用）
     charts: Optional[list[ChartData]] = None
+
+    # 聊天洞察
+    conversation_insights: Optional[str] = None
 
 
 class ExportRequest(BaseModel):

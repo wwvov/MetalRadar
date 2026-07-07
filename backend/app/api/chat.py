@@ -1,13 +1,14 @@
 """Agent Chat & Report — API 路由"""
 
 import logging
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, HTTPException, Body, Response
 
 from app.schemas.chat import (
     ChatRequest, ChatResponse, ReportGenerateRequest, RiskReport,
 )
 from app.services.agent_service import (
     process_chat, generate_report, generate_multi_report, share_report, get_shared_report,
+    generate_pdf_report,
     create_session, list_sessions, get_session, delete_session, rename_session,
     get_available_models, get_dashboard_context, get_recommended_questions,
 )
@@ -23,8 +24,10 @@ def chat(request: ChatRequest):
     """Agent 对话接口"""
     try:
         history = [{"role": h.role, "content": h.content} for h in request.history] if request.history else None
+        # process_chat 只接受单个 company_id，从 company_id 或 company_ids 推导
+        target_company_id = request.company_id or (request.company_ids[0] if request.company_ids else None)
         return process_chat(
-            company_id=request.company_id, message=request.message,
+            company_id=target_company_id, message=request.message,
             scenario=request.scenario, history=history,
             session_id=request.session_id, model=request.model or "deepseek-v4-flash",
         )
@@ -37,7 +40,7 @@ def chat(request: ChatRequest):
 
 @router.post("/sessions")
 def api_create_session(body: dict = Body(...)):
-    return create_session(title=body.get("title", "新对话"), model=body.get("model", "glm-5.2"))
+    return create_session(title=body.get("title", "新对话"), model=body.get("model", "deepseek-v4-flash"))
 
 
 @router.get("/sessions")
@@ -80,7 +83,22 @@ def api_models():
 @router.post("/report", response_model=RiskReport)
 def create_report(request: ReportGenerateRequest):
     try:
-        return generate_report(company_id=request.company_id, material=request.material)
+        # 纯金属报告模式（无需公司ID）
+        if request.material_names and not request.company_ids and not request.company_id:
+            return generate_report(
+                material_names=request.material_names,
+                conversation_context=request.conversation_context,
+            )
+        # 复合ID：优先用 company_ids，回退到 company_id
+        target_ids = request.company_ids or ([request.company_id] if request.company_id else None)
+        if not target_ids:
+            raise HTTPException(400, "至少需要提供一个公司ID (company_id 或 company_ids) 或金属品种 (material_names)")
+        return generate_report(
+            company_ids=target_ids,
+            material=request.material,
+            material_names=request.material_names,  # 传递金属品种用于金属聚焦报告
+            conversation_context=request.conversation_context,
+        )
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
@@ -116,16 +134,37 @@ def get_shared_report_api(share_id: str):
     return r
 
 
+@router.post("/report/pdf")
+def export_pdf(request: ReportGenerateRequest):
+    """生成并下载 PDF 分析报告"""
+    try:
+        report = generate_report(company_id=request.company_id, material=request.material)
+        pdf_bytes = generate_pdf_report(report)
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": "attachment; filename=\"report.pdf\""},
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.error(f"PDF export error: {e}", exc_info=True)
+        raise HTTPException(500, str(e))
+
+
 # ─── Dashboard ──────────────────────────────────────────────────
 
 @router.get("/dashboard")
-def api_dashboard(company_id: str = None, tab: str = "company"):
-    return get_dashboard_context(company_id, tab)
+def api_dashboard(company_id: str = None, company_ids: str = None, tab: str = "company", message: str = None, materials: str = None):
+    ids = [c.strip() for c in company_ids.split(",") if c.strip()] if company_ids else None
+    mats = [m.strip() for m in materials.split(",") if m.strip()] if materials else None
+    return get_dashboard_context(company_id, tab, message, ids, mats)
 
 
 @router.get("/recommended")
-def api_recommended(company_id: str = None):
-    return get_recommended_questions(company_id)
+def api_recommended(company_id: str = None, company_ids: str = None, message: str = None):
+    ids = [c.strip() for c in company_ids.split(",") if c.strip()] if company_ids else None
+    return get_recommended_questions(company_id or (ids[0] if ids else None), message)
 
 
 # ─── Context ────────────────────────────────────────────────────
