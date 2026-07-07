@@ -566,6 +566,7 @@ def _generate_single_report(company_id: str, material: str = None, conversation_
 
         cost_structure = [
             {"name": m.material_name or "未知", "cost_pct": float(m.cost_pct or 0),
+             "cost_pct_valid": m.cost_pct is not None and float(m.cost_pct or 0) > 0,
              "direction": m.direction or "不利", "base_price": float(m.base_price) if m.base_price else None,
              "current_price": price_data_map.get(m.material_name or "", {}).get("current_price")}
             for m in materials
@@ -638,6 +639,9 @@ def _generate_company_focused_report(company_ids: list[str], material: str = Non
         all_cost_structures = []
         all_profiles = []
 
+        # 全局金属价格缓存，避免重复拉取行情
+        price_cache: dict[str, dict] = {}
+
         for cid in company_ids[:5]:
             comp = db.query(Company).filter(Company.id == cid).first()
             if not comp:
@@ -655,15 +659,35 @@ def _generate_company_focused_report(company_ids: list[str], material: str = Non
             t_name = target.material_name or "未知品种"
             cost_data = _get_cost_exposure(cid)
             risk_news = _search_news(cid, t_name)
+
+            # 为目标核心金属拉取行情
             price_info = _run_with_timeout(lambda: _get_price_info(t_name), 5.0, {"error": "timeout"})
             price_data_map = {t_name: price_info} if "error" not in price_info else {}
             risk_result = _compute_risk(cost_data, risk_news, price_data_map)
 
-            cost_structure = [
-                {"name": m.material_name or "未知", "cost_pct": float(m.cost_pct or 0),
-                 "direction": m.direction or "不利", "company": comp.name, "company_code": comp.id}
-                for m in mats if float(m.cost_pct or 0) > 0
-            ]
+            # 为该公司的每种原材料补齐当前价格（带缓存）
+            cost_structure = []
+            for m in mats:
+                m_name = m.material_name or "未知"
+                cost_pct_val = float(m.cost_pct or 0)
+                has_cost_pct = m.cost_pct is not None and cost_pct_val > 0
+
+                if m_name not in price_cache:
+                    p_info = _run_with_timeout(lambda: _get_price_info(m_name), 3.0, {"error": "timeout"})
+                    price_cache[m_name] = p_info
+                else:
+                    p_info = price_cache[m_name]
+
+                cost_structure.append({
+                    "name": m_name,
+                    "cost_pct": cost_pct_val if has_cost_pct else 0,
+                    "cost_pct_valid": has_cost_pct,
+                    "direction": m.direction or "不利",
+                    "company": comp.name,
+                    "company_code": comp.id,
+                    "current_price": p_info.get("current_price") if "error" not in p_info else None,
+                    "base_price": float(m.base_price) if m.base_price else None,
+                })
             all_cost_structures.extend(cost_structure)
             profile = _build_company_profile(comp, mats)
             all_profiles.append({"name": comp.name or "未知", "code": comp.id, "profile": profile})

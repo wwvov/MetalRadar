@@ -1090,7 +1090,9 @@ function ReportPanel({ report, onClose, onExportHTML, onExportPDF }: {
                     <tr key={i} className="border-t border-slate-100">
                       {item.company && <td className="px-4 py-2.5 text-xs text-green-800 font-medium">{item.company}</td>}
                       <td className="px-4 py-2.5 font-medium text-slate-800">{item.name}</td>
-                      <td className="px-4 py-2.5 text-right">{item.cost_pct}%</td>
+                      <td className="px-4 py-2.5 text-right">
+                        {item.cost_pct_valid ? `${item.cost_pct}%` : <span className="text-slate-400">待补充数据</span>}
+                      </td>
                       <td className="px-4 py-2.5 text-right text-slate-600">{item.current_price ? item.current_price.toLocaleString() : '--'}</td>
                       <td className="px-4 py-2.5 text-xs"><span className={cn('px-1.5 py-0.5 rounded', item.direction === '有利' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700')}>{item.direction}</span></td>
                     </tr>
