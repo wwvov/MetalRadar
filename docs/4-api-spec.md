@@ -214,11 +214,22 @@ Base URL: `/api`
 
 ---
 
-## AI Agent 对话 📋（Sprint 3 待实现）
+## AI Agent 对话 ✅
 
-- `POST /chat` body: `{ company_id, message, scenario? }`
-  → `{ reply: string, chart?: { type, ... } }`
-  chart 类型：line / bar / flow / gauge，具体字段见 ai-capabilities
+- `POST /api/chat` body: `{ conversation_id?, message, model? }`
+  → 流式 SSE 响应，返回对话消息
+- `GET /api/chat/conversations` → 获取用户的会话列表
+- `POST /api/chat/conversations` → 创建新会话
+- `DELETE /api/chat/conversations/{id}` → 删除会话
+- `POST /api/chat/conversations/{id}/messages` → 发送消息
+- `GET /api/chat/conversations/{id}/messages` → 获取会话消息历史
+- `POST /api/reports/mri` body: `{ company_ids?, metal? }` → 生成 MRI 风险报告
+- `GET /api/reports/{id}` → 获取报告详情
+
+## 知识图谱 ✅
+
+- `GET /api/knowledge-graph?company_ids=1,2,3&include_news=true&include_materials=true&include_industries=true`
+  → `{ nodes: [...], edges: [...] }` 生成多公司知识图谱数据
 
 ---
 

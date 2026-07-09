@@ -184,12 +184,14 @@ if (error) return <ErrorCard onRetry={refetch} />;
 - **收藏新闻修复** ✅ favorites Tab 专用端点，修复分页截断和 SHMET 源排除 bug
 - **产业链全景分析** ✅ LLM 分析 + Mermaid 流程图渲染 + CompanyPortrait 区域二重构
 - **安全加固** ✅ .env 加入 .gitignore，API 密钥从 Git 历史移除
-- **知识图谱占位页** ✅ 紫色主题 + GitGraph导航入口 + 功能预告
+- **知识图谱** ✅ ReactFlow 交互式图谱 + 公司选择器 + 节点类型筛选 + 节点详情面板 + AI 分析入口
 - **上海金属网快讯优化** ✅ 自适应高度布局(contain:layout_size) + 弹性滚动适配右侧仪表盘高度
 
-### Sprint 3 📋 规划中
-- AI Agent 对话（三个场景：风险扫描/事件推演/自由问答）
-- 内嵌图表渲染（line/bar/flow/gauge）
+### Sprint 3 ✅ 已完成
+- AI Agent 对话（三栏式布局：会话管理 + 模型切换 + 对话分析 + 报告生成/导出）
+- MRI 风险报告（多公司/单公司 + 成本结构分析 + 金属聚焦报告）
+- 多公司/多金属仪表盘
+- 知识图谱完整功能实现
 - 新闻源扩展（个股新闻、财联社）
 - Redis 缓存切换
 - PostgreSQL 生产环境迁移

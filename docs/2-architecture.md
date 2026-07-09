@@ -41,8 +41,8 @@ frontend/src/
 │   ├── HomePage.tsx        # 首页：新闻聚合+仪表盘
 │   ├── WatchlistPage.tsx   # 我的关注：公司管理+画像
 │   ├── CompanyPage.tsx     # 公司详情（财务指标/市值走势/成本压力）
-│   ├── AgentPage.tsx           # AI Agent（Sprint 3 待实现）
-│   └── KnowledgeGraphPage.tsx  # 知识图谱（占位页面，功能预告）
+│   ├── AgentPage.tsx           # AI Agent（三栏式对话 + 会话管理 + MRI报告）
+│   └── KnowledgeGraphPage.tsx  # 知识图谱（ReactFlow 可视化 + 节点详情）
 ├── components/
 │   ├── ui/                 # shadcn/ui 组件 (Button, Card, Tabs, Dialog, Drawer, Badge, Skeleton, Tooltip, Slider 等)
 │   ├── news/               # NewsCard, NewsSkeleton, MacroPanel, MacroTicker, ShmetBlock, MetalPriceDashboard, FavoritePopover, EmptyGuide, ErrorCard

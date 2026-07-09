@@ -238,17 +238,26 @@ LLM 扮演资深产业链分析师，输出 JSON：
 
 ---
 
-## AI Agent 对话 📋（Sprint 3 — 待实现）
+## AI Agent 对话 ✅（已实现）
 
-### Agent 工具函数（计划）
+### Agent 工具函数（已实现）
 - `search_risk_news(company_id, days=30)` → 从数据库查询与该公司的材料相关的风险新闻
 - `get_price_trend(material, period)` → 从行情接口获取价格数据并计算趋势、分位、波动率
 - `get_cost_exposure(company_id, material)` → 从 company_materials 表读取成本占比和影响方向
 
-### Agent 对话流程（计划）
+### Agent 对话流程
 用户提问 → Planner 选择工具 → 调用工具获取实时结构化数据 → LLM 推理生成自然语言回复 + 可选 chart 参数 → 前端渲染。
 
-### 内嵌图表 schema (ChartParam) — 计划
+### 前端功能
+- 三栏布局：左栏会话管理、中栏对话区域、右栏报告与仪表盘
+- 会话管理：新建/切换/删除对话，独立历史记录
+- 模型切换：支持切换 DeepSeek 模型
+- MRI 风险报告：多公司对比 + 单公司深度分析 + 导出功能
+- 金属聚焦报告：按金属品种分析产业链影响
+- 多公司/多金属仪表盘
+- 推荐问题：预置行业分析问题
+
+### 内嵌图表 schema (ChartParam)
 | type | 说明 | 参数 |
 |------|------|------|
 | line | 价格走势+新闻标注 | 品种名, 时间序列数据, newsMarkPoints |
