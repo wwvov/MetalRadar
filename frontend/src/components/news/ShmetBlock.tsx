@@ -48,6 +48,13 @@ export function ShmetBlock() {
     } catch { /* pass */ }
   }
 
+  const handleMarkRead = async (newsId: string) => {
+    try {
+      await newsService.markAsRead(newsId)
+      query.refetch()
+    } catch { /* pass */ }
+  }
+
   return (
     <Card className="border-green-200 shadow-sm flex flex-col [contain:layout_size]">
       <CardHeader className="pb-2">
@@ -86,7 +93,7 @@ export function ShmetBlock() {
                     key={item.id}
                     news={item}
                     onFavorite={handleFavorite}
-                    onMarkRead={async () => {}}
+                    onMarkRead={handleMarkRead}
                     onTagClick={() => {}}
                     followedCompanyNames={new Map(follows.map((c) => [c.id, c.name]))}
                   />

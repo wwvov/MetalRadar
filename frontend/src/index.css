@@ -36,7 +36,7 @@ body {
 }
 
 .animate-marquee {
-  animation: marquee 60s linear infinite;
+  animation: marquee 120s linear infinite;
 }
 
 /* 隐藏滚动条 */

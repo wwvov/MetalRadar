@@ -25,6 +25,7 @@ export const companyService = {
     }
     const { data } = await api.post<CompanyDetail>('/companies/init', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 180000,  // 3分钟 — 公司初始化+画像生成需要较长时间
     })
     return data
   },
@@ -39,6 +40,7 @@ export const companyService = {
     formData.append('report_pdf', reportPdf)
     const { data } = await api.post<CompanyDetail>(`/companies/${companyId}/upload-report`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 180000,  // 3分钟 — 财报AI提取需要较长时间
     })
     return data
   },
@@ -50,6 +52,7 @@ export const companyService = {
     }
     const { data } = await api.post<CompanyDetail>(`/companies/${companyId}/regenerate`, formData, {
       headers: reportPdf ? { 'Content-Type': 'multipart/form-data' } : {},
+      timeout: 180000,  // 3分钟 — 画像重新生成需要较长时间
     })
     return data
   },

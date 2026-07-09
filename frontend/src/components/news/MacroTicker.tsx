@@ -57,7 +57,7 @@ export function MacroTicker({ news, isLoading, lastRefreshed, onRefresh, refresh
                 paused ? 'animate-none' : 'animate-marquee'
               )}
               style={{
-                animationDuration: paused ? undefined : '60s',
+                animationDuration: paused ? undefined : '120s',
                 animationTimingFunction: 'linear',
                 animationIterationCount: 'infinite',
               }}

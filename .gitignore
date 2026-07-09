@@ -4,13 +4,18 @@ frontend/node_modules/
 
 # Python
 backend/venv/
+backend/.venv/
 backend/Lib/
 backend/Scripts/
 backend/__pycache__/
 backend/app/__pycache__/
 backend/app/**/__pycache__/
+.venv/
+venv/
 *.pyc
 *.pyo
+*.egg-info/
+dist/
 
 # Database
 *.db
@@ -19,6 +24,8 @@ backend/app/**/__pycache__/
 
 # Cache
 backend/.cache/
+.pytest_cache/
+frontend/.vite/
 
 # Build
 frontend/dist/
@@ -26,6 +33,12 @@ frontend/dist/
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+
+# Claude Code (local user settings, do NOT commit)
+.claude/
 
 # OS
 .DS_Store
@@ -35,6 +48,16 @@ Thumbs.db
 .env
 .env.local
 .env.production
+.env.development
+backend/.env
+frontend/.env
+frontend/.env.local
+frontend/.env.production
+
+# Test coverage
+.coverage
+htmlcov/
+coverage/
 
 # Generated docs (keep in git, these are deliverables)
 # *.docx

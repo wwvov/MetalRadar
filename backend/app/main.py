@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import init_db, SessionLocal
-from app.api import news, companies, user, seed, futures, stocks, chat
+from app.api import news, companies, user, seed, futures, stocks, chat, knowledge_graph
 
 logger = logging.getLogger(__name__)
 
@@ -216,6 +216,7 @@ app.include_router(seed.router, prefix="/api")
 app.include_router(futures.router, prefix="/api")
 app.include_router(stocks.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
+app.include_router(knowledge_graph.router, prefix="/api")
 
 
 @app.get("/api/health")

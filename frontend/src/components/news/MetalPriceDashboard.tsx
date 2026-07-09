@@ -16,17 +16,16 @@ import {
   AlertTriangle,
   CheckCircle2,
   Star,
-  Globe,
   RefreshCw,
   Search,
   Clock,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useFuturesDashboard, useFuturesOverview, useCompaniesWithMaterials } from '@/hooks/useFutures'
+import { useFuturesDashboard, useCompaniesWithMaterials } from '@/hooks/useFutures'
 import { ErrorCard } from './ErrorCard'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { CompanyBasic } from '@/types/company'
-import type { DashboardMaterial, OverviewMetal, PricePercentile, FuturesQuote } from '@/types/futures'
+import type { DashboardMaterial, PricePercentile, FuturesQuote } from '@/types/futures'
 
 // ===== 价格格式化 =====
 function fmtPrice(v: number, unit: string): string {
@@ -298,9 +297,6 @@ interface Props {
   className?: string
 }
 
-// 特殊的"全部公司"ID
-const OVERVIEW_ID = '__overview__'
-
 export function MetalPriceDashboard({ follows, className }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [activeIdx, setActiveIdx] = useState(0)
@@ -310,13 +306,8 @@ export function MetalPriceDashboard({ follows, className }: Props) {
   const pickerRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
-  // 是否在"全部公司"概览模式
-  const isOverview = selectedId === OVERVIEW_ID
-  const effectiveCompanyId = isOverview ? null : selectedId
-
-  // 数据查询
-  const { data, isLoading, isError, refetch, dataUpdatedAt } = useFuturesDashboard(effectiveCompanyId)
-  const overviewQuery = useFuturesOverview()
+  // 数据查询（始终按选中公司查询，无概览模式）
+  const { data, isLoading, isError, refetch, dataUpdatedAt } = useFuturesDashboard(selectedId)
   const companiesQuery = useCompaniesWithMaterials()
 
   // 所有有材料数据的公司列表
@@ -345,8 +336,7 @@ export function MetalPriceDashboard({ follows, className }: Props) {
   useEffect(() => {
     if (allCompanies.length > 0) {
       setSelectedId((prev) => {
-        if (prev && prev !== OVERVIEW_ID && allCompanies.some(c => c.id === prev)) return prev
-        if (prev === OVERVIEW_ID) return prev
+        if (prev && allCompanies.some(c => c.id === prev)) return prev
         // 优先选第一个关注的公司
         const firstFollowed = allCompanies.find(c => followedIds.has(c.id))
         return firstFollowed?.id || allCompanies[0]?.id || null
@@ -389,32 +379,20 @@ export function MetalPriceDashboard({ follows, className }: Props) {
   }, [])
 
   const handleRefresh = useCallback(() => {
-    if (isOverview) {
-      overviewQuery.refetch()
-    } else {
-      refetch()
-    }
-  }, [isOverview, overviewQuery, refetch])
+    refetch()
+  }, [refetch])
 
   // 判断数据
   const noData = allCompanies.length === 0 && follows.length === 0
-  const effectiveIsLoading = isOverview ? overviewQuery.isLoading : isLoading
-  const effectiveIsError = isOverview ? overviewQuery.isError : isError
-  const effectiveRefetch = isOverview ? () => overviewQuery.refetch() : () => refetch()
-  const lastUpdated = isOverview ? overviewQuery.dataUpdatedAt : dataUpdatedAt
 
   // 获取材料列表
   const materials: DashboardMaterial[] = data?.data?.materials || []
   const company = data?.data?.company
   const activeMaterial = materials[activeIdx] || null
 
-  // 概览模式的金属列表
-  const overviewMetals: OverviewMetal[] = overviewQuery.data?.data?.metals || []
-  const activeOverviewMetal = overviewMetals[activeIdx] || null
-
   // 格式化最后更新时间
-  const lastUpdatedText = lastUpdated
-    ? new Date(lastUpdated).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  const lastUpdatedText = dataUpdatedAt
+    ? new Date(dataUpdatedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     : '--'
 
   return (
@@ -439,7 +417,7 @@ export function MetalPriceDashboard({ follows, className }: Props) {
               onClick={() => setCompanyPickerOpen(!companyPickerOpen)}
             >
               <span className="truncate">
-                {isOverview ? '🌐 全部公司' : (company?.name || follows[0]?.name || '选择公司')}
+                {company?.name || follows[0]?.name || '选择公司'}
               </span>
               <ChevronDown className="w-3.5 h-3.5 shrink-0" />
             </Button>
@@ -461,21 +439,6 @@ export function MetalPriceDashboard({ follows, className }: Props) {
                 </div>
                 {/* 列表 */}
                 <div className="max-h-64 overflow-y-auto">
-                  {/* 全部公司选项 */}
-                  <button
-                    className={cn(
-                      'w-full text-left px-3 py-2 text-[12px] hover:bg-amber-50 transition-colors flex items-center gap-2',
-                      isOverview && 'bg-amber-100 text-amber-900 font-medium',
-                    )}
-                    onClick={() => handleSelectCompany(OVERVIEW_ID)}
-                  >
-                    <Globe className="w-3.5 h-3.5 text-blue-500" />
-                    <span>全部公司</span>
-                    <span className="text-slate-400 ml-auto text-[11px]">
-                      {allCompanies.length}家
-                    </span>
-                  </button>
-                  <div className="border-t border-slate-100" />
                   {filteredCompanies.map((c) => {
                     const isFollowed = followedIds.has(c.id)
                     return (
@@ -515,9 +478,9 @@ export function MetalPriceDashboard({ follows, className }: Props) {
             size="sm"
             className="h-6 w-6 p-0 text-slate-400 hover:text-emerald-600"
             onClick={handleRefresh}
-            disabled={effectiveIsLoading}
+            disabled={isLoading}
           >
-            <RefreshCw className={cn('w-3.5 h-3.5', effectiveIsLoading && 'animate-spin')} />
+            <RefreshCw className={cn('w-3.5 h-3.5', isLoading && 'animate-spin')} />
           </Button>
           <span className="flex items-center gap-1 text-[10px] text-emerald-600">
             <span className="relative flex h-2 w-2">
@@ -534,11 +497,11 @@ export function MetalPriceDashboard({ follows, className }: Props) {
         <div className="flex-1 flex items-center justify-center py-12 text-sm text-slate-400">
           请先在「我的关注」中添加公司
         </div>
-      ) : effectiveIsError ? (
+      ) : isError ? (
         <div className="p-4">
-          <ErrorCard onRetry={effectiveRefetch} />
+          <ErrorCard onRetry={() => refetch()} />
         </div>
-      ) : effectiveIsLoading ? (
+      ) : isLoading ? (
         <div className="p-4 space-y-3">
           <Skeleton className="h-6 w-48" />
           <Skeleton className="h-24 w-full" />
@@ -546,162 +509,6 @@ export function MetalPriceDashboard({ follows, className }: Props) {
           <Skeleton className="h-20 w-full" />
           <Skeleton className="h-12 w-full" />
         </div>
-      ) : isOverview ? (
-        // ===== 概览模式：显示所有金属品种 =====
-        overviewMetals.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center py-12 text-sm text-slate-400">
-            暂无敏感品种数据
-          </div>
-        ) : (
-          <>
-            {/* 品种切换 Tab */}
-            <div className="flex items-center gap-1 px-3 py-2 overflow-x-auto border-b border-amber-50 shrink-0 scrollbar-hide">
-              <span className="text-[10px] text-blue-500 shrink-0 mr-1 font-medium">
-                🌐 {overviewMetals.length}个品种
-              </span>
-              {overviewMetals.map((m, i) => (
-                <Button
-                  key={m.material_name}
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    'h-6 text-[11px] px-2 rounded-full shrink-0',
-                    activeIdx === i
-                      ? 'bg-amber-100 text-amber-700 font-medium'
-                      : 'text-slate-500 hover:bg-slate-100',
-                  )}
-                  onClick={() => setActiveIdx(i)}
-                >
-                  {m.material_name}
-                  <span className="ml-0.5 text-[10px] opacity-60">{m.total_companies}家</span>
-                </Button>
-              ))}
-            </div>
-
-            {/* 内容 */}
-            {activeOverviewMetal && (
-              <div className="p-4 space-y-4 flex-1 overflow-y-auto">
-                {/* 报价区 */}
-                {activeOverviewMetal.quote ? (
-                  <QuoteSection material={activeOverviewMetal.material_name} unit={activeOverviewMetal.unit} quote={activeOverviewMetal.quote} />
-                ) : (
-                  <div className="text-[12px] text-slate-400 py-4 text-center bg-slate-50 rounded-lg">
-                    暂无 {activeOverviewMetal.material_name} 期货报价
-                    {activeOverviewMetal.contract ? '' : '（未配置合约代码）'}
-                  </div>
-                )}
-
-                {/* 受影响公司列表 */}
-                <div className="space-y-1">
-                  <span className="text-[12px] font-medium text-slate-700">
-                    受影响公司 ({activeOverviewMetal.total_companies}家)
-                  </span>
-                  <div className="flex flex-wrap gap-1">
-                    {activeOverviewMetal.companies.map((comp) => (
-                      <Button
-                        key={comp.company_id}
-                        variant="ghost"
-                        size="sm"
-                        className={cn(
-                          'h-5 text-[11px] px-1.5 rounded-full',
-                          followedIds.has(comp.company_id)
-                            ? 'bg-amber-50 text-amber-700 hover:bg-amber-100'
-                            : 'bg-slate-50 text-slate-600 hover:bg-slate-100',
-                        )}
-                        onClick={() => handleSelectCompany(comp.company_id)}
-                      >
-                        {followedIds.has(comp.company_id) && <Star className="w-2.5 h-2.5 mr-0.5 fill-amber-500 text-amber-500" />}
-                        {comp.company_name}
-                        {comp.cost_pct != null && (
-                          <span className="ml-0.5 text-[10px] opacity-60">{comp.cost_pct}%</span>
-                        )}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="border-t border-slate-100" />
-
-                {/* 压力条（基于均价） */}
-                {activeOverviewMetal.quote && (
-                  <PressureBar material={{
-                    material_name: activeOverviewMetal.material_name,
-                    unit: activeOverviewMetal.unit,
-                    cost_pct: null,
-                    direction: 'negative',
-                    contract: activeOverviewMetal.contract,
-                    quote: activeOverviewMetal.quote,
-                    percentile_1y: activeOverviewMetal.percentile_1y,
-                    percentile_2y: activeOverviewMetal.percentile_2y,
-                    history_3m: activeOverviewMetal.history_3m,
-                    pressure: {
-                      base_price: null,
-                      current_price: activeOverviewMetal.quote.price,
-                      change_pct: activeOverviewMetal.quote.change_pct,
-                      pressure_level: Math.abs(activeOverviewMetal.quote.change_pct) < 5 ? 'low' :
-                        Math.abs(activeOverviewMetal.quote.change_pct) < 15 ? 'medium' : 'high',
-                      weighted_impact: null,
-                    },
-                  }} />
-                )}
-
-                {/* 价格分位 */}
-                {(percentilePeriod === 252 ? activeOverviewMetal.percentile_1y : activeOverviewMetal.percentile_2y) && (
-                  <PercentileThermometer
-                    percentile={percentilePeriod === 252 ? activeOverviewMetal.percentile_1y! : activeOverviewMetal.percentile_2y!}
-                    period={percentilePeriod}
-                    onTogglePeriod={() => setPercentilePeriod(p => p === 252 ? 504 : 252)}
-                    unit={activeOverviewMetal.unit}
-                  />
-                )}
-
-                {/* 2026年以来涨跌幅 */}
-                {activeOverviewMetal.ytd_change_pct != null && (
-                  <div className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
-                    <span className="text-[12px] font-medium text-slate-600">2026年以来</span>
-                    <span className={cn(
-                      'text-[13px] font-semibold tabular-nums',
-                      activeOverviewMetal.ytd_change_pct > 0 ? 'text-rose-600' :
-                      activeOverviewMetal.ytd_change_pct < 0 ? 'text-emerald-600' :
-                      'text-slate-500',
-                    )}>
-                      {activeOverviewMetal.ytd_change_pct > 0 ? '+' : ''}{activeOverviewMetal.ytd_change_pct}%
-                    </span>
-                  </div>
-                )}
-
-                {/* 走势图 */}
-                {activeOverviewMetal.history_3m.length > 0 && (
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[12px] font-medium text-slate-700">近3月走势</span>
-                      <span className={cn(
-                        'text-[11px] font-medium tabular-nums',
-                        activeOverviewMetal.history_3m[0].close <=
-                          activeOverviewMetal.history_3m[activeOverviewMetal.history_3m.length - 1].close
-                          ? 'text-rose-600' : 'text-emerald-600',
-                      )}>
-                        涨跌 {(() => {
-                          const first = activeOverviewMetal.history_3m[0].close
-                          const last = activeOverviewMetal.history_3m[activeOverviewMetal.history_3m.length - 1].close
-                          const pct = ((last - first) / first * 100).toFixed(2)
-                          return `${+pct > 0 ? '+' : ''}${pct}%`
-                        })()}
-                      </span>
-                    </div>
-                    <div className="h-12 bg-slate-50 rounded">
-                      <MiniLineChart data={activeOverviewMetal.history_3m} />
-                    </div>
-                    <div className="flex justify-between text-[10px] text-slate-400">
-                      <span>3个月前</span>
-                      <span>当前</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </>
-        )
       ) : (
         // ===== 单公司模式 =====
         <>

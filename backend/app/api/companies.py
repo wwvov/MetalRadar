@@ -154,8 +154,15 @@ async def upload_financial_report(
     db: Session = Depends(get_db),
 ):
     """上传财报PDF — 仅提取财务数据，不重新生成画像"""
-    # 解析 PDF
+    # 文件大小校验（服务端二次校验）
     content = await report_pdf.read()
+    file_size_mb = len(content) / (1024 * 1024)
+    if file_size_mb > 25:
+        raise HTTPException(status_code=400, detail=f"文件过大（{file_size_mb:.1f}MB），请上传小于25MB的PDF")
+
+    logger.info(f"收到财报上传: company={company_id}, file={report_pdf.filename}, size={file_size_mb:.1f}MB")
+
+    # 解析 PDF
     try:
         report_text = extract_text_from_pdf(content)
         if not report_text.strip():
@@ -163,24 +170,32 @@ async def upload_financial_report(
                 status_code=400,
                 detail="PDF未提取到文本内容，可能是扫描件/图片PDF，请上传包含文字层的PDF文件",
             )
+        logger.info(f"PDF文本提取成功: {len(report_text)} 字符, company={company_id}")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # 调用 LLM 提取财务数据
+    # 调用 LLM 提取财务数据（较耗时，前端已设置3分钟超时）
     try:
         from app.services.llm_service import extract_financial_report, FinancialExtractionError
         financial_data = extract_financial_report(report_text, company_id)
     except FinancialExtractionError as e:
-        raise HTTPException(status_code=502, detail=f"AI财报分析失败: {str(e)}")
+        logger.error(f"财报AI提取失败: {e}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"AI财报分析失败，请检查API配置或稍后重试。错误详情: {str(e)}",
+        )
     except Exception as e:
+        logger.error(f"财报分析异常: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"财报分析异常: {str(e)}")
 
     if not financial_data.get("report_period"):
-        raise HTTPException(status_code=422, detail="AI未能从PDF中识别到有效的报告期信息")
+        raise HTTPException(status_code=422, detail="AI未能从PDF中识别到有效的报告期信息，请确认PDF包含完整的财务报表")
 
     # 保存到数据库
     try:
-        return company_service.save_financial_report(db, company_id, financial_data)
+        result = company_service.save_financial_report(db, company_id, financial_data)
+        logger.info(f"财报数据已保存: company={company_id}, period={financial_data.get('report_period')}")
+        return result
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 

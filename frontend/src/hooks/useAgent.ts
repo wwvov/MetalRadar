@@ -48,7 +48,11 @@ export function useAgent(companyId?: string, companyIds?: string[], sessionId?: 
 
   const clearChat = useCallback(() => setMessages([]), [])
 
-  return { messages, setMessages, isProcessing, sendMessage, clearChat }
+  const deleteMessage = useCallback((messageId: string | number) => {
+    setMessages(prev => prev.filter(m => m.id !== messageId))
+  }, [])
+
+  return { messages, setMessages, isProcessing, sendMessage, clearChat, deleteMessage }
 }
 
 // ─── Sessions Hook ─────────────────────────────────────────────
@@ -125,6 +129,29 @@ export function useDashboard(companyId?: string, companyIds?: string[], tab = 'c
     queryFn: () => agentService.getDashboard(companyId, companyIds, tab, message, materials),
     enabled: !!companyId || (companyIds && companyIds.length > 0) || tab === 'sentiment' || tab === 'metal',
     staleTime: 30_000,
+  })
+}
+
+// ─── Message Delete Hook ────────────────────────────────────────
+
+export function useDeleteMessage() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ sessionId, messageId }: { sessionId: string; messageId: number }) =>
+      agentService.deleteMessage(sessionId, messageId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sessions'] })
+    },
+  })
+}
+
+export function useClearMessages() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (sessionId: string) => agentService.clearMessages(sessionId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sessions'] })
+    },
   })
 }
 

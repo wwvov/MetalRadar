@@ -321,21 +321,29 @@ def process_chat(
         def _call_llm():
             return client.chat.completions.create(
                 model=model, messages=messages,
-                temperature=0.3, max_tokens=2000, timeout=20,
+                temperature=0.3, max_tokens=2000, timeout=30,
             )
 
         executor = ThreadPoolExecutor(max_workers=1)
         try:
             future = executor.submit(_call_llm)
-            response = future.result(timeout=25)
+            response = future.result(timeout=45)
             reply_text = response.choices[0].message.content or ""
         except FuturesTimeoutError:
-            logger.error("LLM call hard timeout")
-            reply_text = "AI分析服务响应超时（25秒）。请检查网络或API配置。"
+            logger.error("LLM call hard timeout after 45s")
+            reply_text = "AI分析服务响应超时（45秒）。请检查网络连接或稍后重试。若持续超时，可尝试切换模型。"
         except Exception as e:
             logger.error(f"LLM error: {e}")
             err_msg = str(e)
-            reply_text = f"AI分析服务暂时不可用：{err_msg[:150]}。请检查API Key配置。"
+            # Provide user-friendly diagnosis based on error type
+            if "401" in err_msg or "unauthorized" in err_msg.lower():
+                reply_text = "AI服务认证失败，API Key无效或已过期。请在 backend/.env 中更新 LLM_API_KEY。"
+            elif "429" in err_msg or "rate" in err_msg.lower():
+                reply_text = "AI服务请求过于频繁，请稍后重试。"
+            elif "connection" in err_msg.lower() or "timeout" in err_msg.lower():
+                reply_text = "无法连接到AI服务，请检查网络连接和 LLM_BASE_URL 配置。"
+            else:
+                reply_text = f"AI分析服务暂时不可用：{err_msg[:150]}。请检查API Key配置。"
         finally:
             executor.shutdown(wait=False)
 
@@ -452,6 +460,36 @@ def delete_session(session_id: str) -> bool:
         db.delete(s)
         db.commit()
         return True
+    finally:
+        db.close()
+
+
+def delete_message(session_id: str, message_id: int) -> bool:
+    """删除会话中的单条消息"""
+    db = SessionLocal()
+    try:
+        msg = db.query(ChatMessageRecord).filter(
+            ChatMessageRecord.id == message_id,
+            ChatMessageRecord.session_id == session_id,
+        ).first()
+        if not msg:
+            return False
+        db.delete(msg)
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
+def clear_session_messages(session_id: str) -> int:
+    """清空会话中所有消息（保留会话本身）"""
+    db = SessionLocal()
+    try:
+        count = db.query(ChatMessageRecord).filter(
+            ChatMessageRecord.session_id == session_id,
+        ).delete()
+        db.commit()
+        return count
     finally:
         db.close()
 
@@ -1326,34 +1364,21 @@ def get_dashboard_context(company_id: str = None, tab: str = "company", message:
                     "change_pct_24h": price_info.get("change_pct_24h"),
                 })
 
-        # 查找这些金属的关联公司（去重）
+        # 查找这些金属的关联公司（去重）：通过金属名称模糊匹配全库
         if target_materials:
-            all_mats = []
-            for cid in ids[:5] if ids else []:
-                all_mats.extend(_get_cost_exposure(cid))
-            # 如果没有选公司，从全库模糊匹配
-            if not all_mats:
-                all_mats = [{"name": m} for m in target_materials]
-
             seen_codes = set()
-            for m in all_mats:
-                if not m.get("name"):
-                    continue
-                for t in target_materials:
-                    if t in m["name"] or m["name"] in t:
-                        # 找到所属公司
-                        for cid in ids[:5] if ids else []:
-                            cmats = _get_cost_exposure(cid)
-                            for cm in cmats:
-                                if cm.get("name") == m["name"]:
-                                    if cid not in seen_codes:
-                                        seen_codes.add(cid)
-                                        comp = _get_company_context(cid)
-                                        if comp and "error" not in comp:
-                                            related_companies.append({
-                                                "name": comp["name"], "code": comp["code"],
-                                                "max_cost_pct": cm.get("cost_pct", 0)
-                                            })
+            for m_name in target_materials[:3]:
+                for comp in _find_companies_by_materials([m_name])[:6]:
+                    cid = comp["id"]
+                    if cid in seen_codes:
+                        continue
+                    seen_codes.add(cid)
+                    # 计算该公司对这些金属的最大成本占比
+                    max_cost_pct = comp.get("max_cost_pct", 0)
+                    related_companies.append({
+                        "name": comp["name"], "code": comp["code"],
+                        "max_cost_pct": max_cost_pct
+                    })
 
         # 关联新闻：按金属关键词搜索
         seen_titles = set()

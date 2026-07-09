@@ -511,7 +511,7 @@ def analyze_industry_chain(
             logger.warning(f"产业链分析 尝试 {attempt}/{max_retries} 失败: {type(e).__name__}: {e}")
 
         if attempt < max_retries:
-            wait = 2 ** attempt
+            wait = 1  # 固定1秒退避，快速重试
             logger.info(f"等待 {wait}s 后重试...")
             time.sleep(wait)
 
@@ -566,8 +566,8 @@ def extract_financial_report(
             "direct_labor_pct": None, "manufacturing_pct": None, "raw_data": {},
         }
 
-    # 截断文本到 8000 字符（财报文本可能很长）
-    truncated = report_text[:8000] if len(report_text) > 8000 else report_text
+    # 截断文本到 6000 字符（财报文本可能很长，截断减少 token 消耗加速响应）
+    truncated = report_text[:6000] if len(report_text) > 6000 else report_text
 
     user_prompt = (
         f"请从以下财报文本中提取结构化财务数据:\n\n"
@@ -640,7 +640,7 @@ def extract_financial_report(
             logger.warning(f"财务提取尝试 {attempt}/{max_retries} 失败: {type(e).__name__}: {e}")
 
         if attempt < max_retries:
-            wait = 2 ** attempt
+            wait = 1  # 固定1秒退避，快速重试
             logger.info(f"等待 {wait}s 后重试...")
             time.sleep(wait)
 

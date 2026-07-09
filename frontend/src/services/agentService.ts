@@ -24,6 +24,12 @@ export const agentService = {
   deleteSession(id: string): Promise<void> {
     return api.delete(`/chat/sessions/${id}`).then(r => r.data)
   },
+  deleteMessage(sessionId: string, messageId: number): Promise<void> {
+    return api.delete(`/chat/sessions/${sessionId}/messages/${messageId}`).then(r => r.data)
+  },
+  clearMessages(sessionId: string): Promise<{ ok: boolean; deleted: number }> {
+    return api.delete(`/chat/sessions/${sessionId}/messages`).then(r => r.data)
+  },
   renameSession(id: string, title: string): Promise<ChatSessionItem> {
     return api.patch(`/chat/sessions/${id}`, { title }).then(r => r.data)
   },

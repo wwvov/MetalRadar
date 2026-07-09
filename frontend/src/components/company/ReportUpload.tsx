@@ -33,8 +33,8 @@ export function ReportUpload({
         setError('仅支持PDF格式文件')
         return
       }
-      if (file.size > 20 * 1024 * 1024) {
-        setError('文件大小不能超过20MB')
+      if (file.size > 25 * 1024 * 1024) {
+        setError('文件大小不能超过25MB')
         return
       }
 
@@ -138,7 +138,7 @@ export function ReportUpload({
                   <Loader2 className="absolute inset-0 m-auto w-5 h-5 text-blue-600 animate-spin" />
                 </div>
                 <p className="text-sm font-medium text-slate-700 mb-1">正在分析财报...</p>
-                <p className="text-xs text-slate-400">AI 正在提取财务数据，请稍候</p>
+                <p className="text-xs text-slate-400">AI 正在提取财务数据（可能需要1-2分钟），请耐心等待</p>
               </div>
             ) : success ? (
               <div className="py-4">

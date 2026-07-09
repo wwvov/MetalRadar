@@ -11,6 +11,7 @@ from app.services.agent_service import (
     generate_pdf_report,
     create_session, list_sessions, get_session, delete_session, rename_session,
     get_available_models, get_dashboard_context, get_recommended_questions,
+    delete_message, clear_session_messages,
 )
 from app.services.agent_service import _get_company_context, _get_cost_exposure, _search_news
 
@@ -61,6 +62,21 @@ def api_delete_session(session_id: str):
     if not delete_session(session_id):
         raise HTTPException(404, "会话不存在")
     return {"ok": True}
+
+
+@router.delete("/sessions/{session_id}/messages/{message_id}")
+def api_delete_message(session_id: str, message_id: int):
+    """删除会话中的单条消息"""
+    if not delete_message(session_id, message_id):
+        raise HTTPException(404, "消息不存在")
+    return {"ok": True}
+
+
+@router.delete("/sessions/{session_id}/messages")
+def api_clear_session_messages(session_id: str):
+    """清空会话中所有消息（保留会话框架）"""
+    count = clear_session_messages(session_id)
+    return {"ok": True, "deleted": count}
 
 
 @router.patch("/sessions/{session_id}")

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useAgent, useSessions, useSessionDetail, useModels, useReport, useDashboard, useRecommended } from '@/hooks/useAgent'
+import { useAgent, useSessions, useSessionDetail, useModels, useReport, useDashboard, useRecommended, useDeleteMessage, useClearMessages } from '@/hooks/useAgent'
 import { agentService } from '@/services/agentService'
 import { useWatchlist } from '@/providers'
 import { useFollows } from '@/hooks/useFollows'
@@ -15,21 +15,132 @@ import {
   FileDown, HelpCircle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useLocation } from "react-router-dom";
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 // ─── Simple Markdown Renderer ──────────────────────────────────
+interface GraphNode {
+  id: string;
+  type: "company" | "material" | "industry" | "news";
+  title: string;
+  subtitle?: string;
+}
+function buildPrompt(node: GraphNode): string {
+  switch (node.type) {
+    case "news":
+      return `请分析新闻《${node.title}》可能带来的产业链影响，并说明影响企业及风险传播路径。`;
+
+    case "material":
+      return `请分析${node.title}价格变化对相关企业成本、供应链及产业链的影响。`;
+
+    case "industry":
+      return `请分析${node.title}当前上下游风险传导路径。`;
+
+    case "company":
+      return `请分析${node.title}当前供应链经营风险，并说明可能影响哪些上下游企业。`;
+
+    default:
+      return "";
+  }
+}
 
 function SimpleMarkdown({ text }: { text: string }) {
-  const html = text
-    .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-slate-900">$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    .replace(/`(.*?)`/g, '<code class="bg-slate-100 px-1 py-0.5 rounded text-sm text-rose-600">$1</code>')
-    .replace(/^### (.+)$/gm, '<h3 class="text-base font-semibold text-slate-900 mt-3 mb-1">$1</h3>')
-    .replace(/^## (.+)$/gm, '<h2 class="text-lg font-semibold text-slate-900 mt-4 mb-2">$1</h2>')
-    .replace(/^- (.+)$/gm, '<li class="ml-4 text-slate-700">$1</li>')
-    .replace(/^(\d+)\. (.+)$/gm, '<li class="ml-4 text-slate-700">$1. $2</li>')
-    .replace(/\n\n/g, '<br/><br/>')
-    .replace(/---/g, '<hr class="my-3 border-slate-200"/>')
-  return <div className="text-sm leading-relaxed text-slate-700" dangerouslySetInnerHTML={{ __html: html }} />
+  // Helper: parse a markdown table block into HTML table
+  const parseTable = (block: string): string => {
+    const lines = block.trim().split('\n').filter(Boolean)
+    if (lines.length < 2) return block
+
+    const rows = lines.map(line =>
+      line.split('|').map(cell => cell.trim()).filter((_, i, arr) => i > 0 || arr.length > 1)
+    )
+
+    // Remove leading/empty cells caused by leading/trailing pipes
+    const cleanRows = rows.map(row => {
+      const r = [...row]
+      if (r.length > 0 && r[0] === '') r.shift()
+      if (r.length > 0 && r[r.length - 1] === '') r.pop()
+      return r
+    })
+    
+    if (cleanRows.length < 2) return block
+
+    const [headerRow, separatorRow, ...bodyRows] = cleanRows
+
+    // Validate separator row: should contain only - and | and :
+    if (!separatorRow.every(cell => /^[-: ]+$/.test(cell))) return block
+
+    let html = '<table class="w-full text-xs border-collapse border border-slate-200 my-2">'
+    html += '<thead><tr>'
+    headerRow.forEach(cell => {
+      html += `<th class="text-left font-semibold text-slate-800 bg-slate-50 border border-slate-200 px-2 py-1">${escapeHtml(cell)}</th>`
+    })
+    html += '</tr></thead><tbody>'
+    bodyRows.forEach(row => {
+      html += '<tr>'
+      row.forEach(cell => {
+        html += `<td class="text-slate-700 border border-slate-200 px-2 py-1">${escapeHtml(cell)}</td>`
+      })
+      html += '</tr>'
+    })
+    html += '</tbody></table>'
+    return html
+  }
+
+  const escapeHtml = (str: string) => str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+
+  // Split text into table blocks and non-table blocks
+  const parts: { type: 'text' | 'table'; content: string }[] = []
+  const lines = text.split('\n')
+  let currentText: string[] = []
+  let currentTable: string[] = []
+  let inTable = false
+
+  const flushText = () => {
+    if (currentText.length > 0) {
+      parts.push({ type: 'text', content: currentText.join('\n') })
+      currentText = []
+    }
+  }
+  const flushTable = () => {
+    if (currentTable.length > 0) {
+      parts.push({ type: 'table', content: currentTable.join('\n') })
+      currentTable = []
+    }
+  }
+
+  for (const line of lines) {
+    const isTableLine = /^\s*\|.*\|\s*$/.test(line) || /^\s*\|?[-:| ]+\|\s*$/.test(line)
+    if (isTableLine) {
+      if (!inTable) flushText()
+      inTable = true
+      currentTable.push(line)
+    } else {
+      if (inTable) flushTable()
+      inTable = false
+      currentText.push(line)
+    }
+  }
+  flushText()
+  flushTable()
+
+  const rendered = parts.map(part => {
+    if (part.type === 'table') return parseTable(part.content)
+    return part.content
+      .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-slate-900">$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/`(.*?)`/g, '<code class="bg-slate-100 px-1 py-0.5 rounded text-sm text-rose-600">$1</code>')
+      .replace(/^### (.+)$/gm, '<h3 class="text-base font-semibold text-slate-900 mt-3 mb-1">$1</h3>')
+      .replace(/^## (.+)$/gm, '<h2 class="text-lg font-semibold text-slate-900 mt-4 mb-2">$1</h2>')
+      .replace(/^- (.+)$/gm, '<li class="ml-4 text-slate-700">$1</li>')
+      .replace(/^(\d+)\. (.+)$/gm, '<li class="ml-4 text-slate-700">$1. $2</li>')
+      .replace(/\n\n/g, '<br/><br/>')
+      .replace(/---/g, '<hr class="my-3 border-slate-200"/>')
+  }).join('')
+
+  return <div className="text-sm leading-relaxed text-slate-700" dangerouslySetInnerHTML={{ __html: rendered }} />
 }
 
 // ─── Chart Renderer ────────────────────────────────────────────
@@ -280,6 +391,7 @@ function SessionSidebar({
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null)
 
   return (
     <div className="w-full h-full bg-white border-r border-slate-200 flex flex-col">
@@ -322,16 +434,30 @@ function SessionSidebar({
                   <p className="text-[10px] text-slate-400 mt-0.5">{s.message_count}条消息</p>
                 </>
               )}
-              <div className="absolute right-2 top-2 hidden group-hover:flex items-center gap-0.5">
+              <div className="absolute right-2 top-2 flex items-center gap-0.5 opacity-50 group-hover:opacity-100 transition-opacity">
                 <button onClick={(e) => { e.stopPropagation(); setEditingId(s.id); setEditTitle(s.title) }}
                   className="p-1 rounded hover:bg-slate-200"><Edit3 className="w-3 h-3 text-slate-400" /></button>
-                <button onClick={(e) => { e.stopPropagation(); onDelete(s.id) }}
+                <button onClick={(e) => { e.stopPropagation(); setDeleteTarget({ id: s.id, title: s.title }) }}
                   className="p-1 rounded hover:bg-rose-50"><Trash2 className="w-3 h-3 text-rose-400" /></button>
               </div>
             </div>
           ))
         )}
       </div>
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(v) => { if (!v) setDeleteTarget(null) }}
+        title="删除对话"
+        description={`确定删除「${deleteTarget?.title}」吗？此操作不可撤销。`}
+        confirmLabel="确定删除"
+        cancelLabel="取消"
+        onConfirm={() => {
+          if (deleteTarget) {
+            onDelete(deleteTarget.id)
+            setDeleteTarget(null)
+          }
+        }}
+      />
     </div>
   )
 }
@@ -1213,6 +1339,8 @@ export default function AgentPage() {
   useFollows()
   const { follows } = useWatchlist()
   const { sessions, createMut, deleteMut, renameMut } = useSessions()
+  const location = useLocation();
+  const graphNode = location.state?.graphNode as GraphNode | undefined;
 
   const [activeSessionId, setActiveSessionId] = useState<string>('')
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([])
@@ -1229,12 +1357,24 @@ export default function AgentPage() {
   const [showHelp, setShowHelp] = useState(false)
   const [reportError, setReportError] = useState<string | null>(null)
 
+  const defaultPrompt = useMemo(() => {
+    if (!graphNode) return '';
+    return buildPrompt(graphNode);
+  }, [graphNode]);
+
+  useEffect(() => {
+    if (!defaultPrompt) return;
+    setInputValue(defaultPrompt);
+  }, [defaultPrompt]);
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const { messages, setMessages, isProcessing, sendMessage } = useAgent(
+  const { messages, setMessages, isProcessing, sendMessage, deleteMessage: removeMessageLocally } = useAgent(
     selectedCompanyIds[0] || undefined, selectedCompanyIds, activeSessionId || undefined, selectedModel
   )
+  const deleteMessageMut = useDeleteMessage()
+  const clearMessagesMut = useClearMessages()
   const { report, generateReport, isGenerating, setReport } = useReport((err: any) => {
     const axiosErr = err as any
     const detail = axiosErr?.response?.data?.detail
@@ -1437,10 +1577,65 @@ export default function AgentPage() {
                 <s.icon className="w-3 h-3" />{s.label}
               </button>
             ))}
+            <div className="flex-1" />
+            {messages.length > 0 && activeSessionId && (
+              <button
+                onClick={() => {
+                  clearMessagesMut.mutate(activeSessionId, {
+                    onSuccess: () => setMessages([]),
+                  })
+                }}
+                disabled={clearMessagesMut.isPending}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-rose-500 border border-rose-200 hover:bg-rose-50 transition-colors"
+                title="清空当前对话的所有消息"
+              >
+                {clearMessagesMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                清空消息
+              </button>
+            )}
           </div>
 
           {/* Messages */}
           <div className="flex-1 overflow-auto px-4 py-3">
+            {graphNode && (
+              <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-4">
+                <div className="flex items-start gap-3">
+                  <Bot className="w-5 h-5 text-blue-600" />
+                  <div className="flex-1">
+                    <div className="font-semibold text-blue-900">
+                      来自知识图谱
+                    </div>
+                    <div className="text-sm text-blue-700 mt-1">
+                      当前分析对象：
+                      <strong>{graphNode.title}</strong>
+                    </div>
+                    {graphNode.subtitle && (
+                      <div className="text-xs text-blue-600 mt-1">
+                        {graphNode.subtitle}
+                      </div>
+                    )}
+                    {defaultPrompt && messages.length === 0 && (
+                      <div className="mt-3 pt-3 border-t border-blue-200">
+                        <p className="text-sm text-blue-800 mb-2">
+                          已自动生成分析任务：
+                        </p>
+                        <p className="text-sm text-blue-700 bg-white px-3 py-2 rounded border border-blue-100 mb-3">
+                          {defaultPrompt}
+                        </p>
+                        <button
+                          onClick={handleSend}
+                          disabled={isProcessing}
+                          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                        >
+                          {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                          开始分析
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
             {messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-center">
                 <div className="w-14 h-14 rounded-2xl bg-green-100 flex items-center justify-center mb-4">
@@ -1469,14 +1664,33 @@ export default function AgentPage() {
             ) : (
               <div className="max-w-3xl mx-auto space-y-3">
                 {messages.map(msg => (
-                  <div key={msg.id} className={cn('flex gap-2.5', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
+                  <div key={msg.id} className={cn('flex gap-2.5 group/message relative', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
                     {msg.role === 'assistant' && (
                       <div className="w-7 h-7 rounded-lg bg-green-100 flex items-center justify-center shrink-0 mt-0.5">
                         <Bot className="w-3.5 h-3.5 text-green-800" />
                       </div>
                     )}
-                    <div className={cn('max-w-[72%] rounded-2xl px-3.5 py-2.5',
+                    <div className={cn('max-w-[72%] rounded-2xl px-3.5 py-2.5 relative',
                       msg.role === 'user' ? 'bg-green-800 text-white' : 'bg-white border border-slate-200 shadow-sm')}>
+                      {/* Per-message delete button */}
+                      <button
+                        onClick={() => {
+                          removeMessageLocally(msg.id)
+                          if (activeSessionId && typeof msg.id === 'number') {
+                            deleteMessageMut.mutate({ sessionId: activeSessionId, messageId: msg.id })
+                          }
+                        }}
+                        className={cn(
+                          'absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center',
+                          'opacity-0 group-hover/message:opacity-100 transition-opacity z-10',
+                          msg.role === 'user'
+                            ? 'bg-slate-600 hover:bg-slate-500 text-white'
+                            : 'bg-slate-200 hover:bg-rose-100 text-slate-400 hover:text-rose-500',
+                        )}
+                        title="删除此消息"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
                       {msg.role === 'user' ? (
                         <p className="text-sm">{msg.content}</p>
                       ) : (
