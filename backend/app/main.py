@@ -180,10 +180,39 @@ def _market_data_auto_refresh():
         time.sleep(interval)
 
 
+def _auto_seed_if_empty():
+    """SCF 冷启动后数据库为空时，自动播种种子数据
+
+    SCF 的 /tmp 是临时存储，冷启动后 SQLite DB 为空。
+    在后台线程中检查并播种，不阻塞启动。"""
+    import time
+    from app.models.company import Company
+
+    # 短暂延迟确保 init_db 完成
+    time.sleep(3)
+
+    db = SessionLocal()
+    try:
+        company_count = db.query(Company).count()
+        if company_count == 0:
+            logger.info("数据库为空，自动播种种子数据（SCF 冷启动恢复）...")
+            from app.api.seed import seed_sprint1
+            result = seed_sprint1(db)
+            logger.info(f"自动播种完成: {result}")
+        else:
+            logger.info(f"数据库已有 {company_count} 家公司，跳过自动播种")
+    except Exception as e:
+        logger.error(f"自动播种失败: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期：启动时初始化数据库，后台预热期货缓存 + 新闻自动刷新"""
     init_db()
+    # SCF 冷启动恢复：数据库为空时自动播种种子数据
+    threading.Thread(target=_auto_seed_if_empty, daemon=True).start()
     # 启动时清理过期缓存 + 预热期货数据，不阻塞启动
     threading.Thread(target=_startup_cleanup_and_warmup, daemon=True).start()
     # 后台新闻自动刷新（守护线程，进程退出时自动终止）

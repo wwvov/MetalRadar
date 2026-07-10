@@ -35,7 +35,14 @@ def get_db():
 
 
 def init_db():
-    """初始化数据库：创建所有表 + 执行轻量迁移"""
+    """初始化数据库：创建所有表 + 执行轻量迁移
+
+    必须在调用 create_all 前导入所有 model 类，否则 SQLAlchemy Base.metadata
+    为空，不会创建任何表。正常 FastAPI 启动时 router import 链会间接导入 model，
+    但 SCF 入口（scf_entry.py）在 app 创建前就调用 init_db()，需显式导入。
+    """
+    # 确保所有 model 类已注册到 Base.metadata（import 即注册）
+    import app.models  # noqa: F401 — 触发 models/__init__.py 导入所有 model
     Base.metadata.create_all(bind=engine)
 
     # 轻量迁移：为 SQLite 已有表添加新列（SQLAlchemy create_all 不会自动修改已有表）

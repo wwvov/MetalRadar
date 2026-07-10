@@ -8,7 +8,6 @@ import {
   Building2,
   ChevronDown,
   Search,
-  ExternalLink,
   TrendingUp,
   Newspaper,
 } from 'lucide-react'

@@ -71,3 +71,9 @@ backend/test_output/
 
 # Project AI data (not for git, include in zip manually)
 .workbuddy/
+
+# Cross-platform pip install artifacts (temporary, used for SCF deployment packaging)
+backend/_jsonpath_temp*/
+backend/_jsonpath_wheel/
+backend/_linux_deps*/
+backend/_linux_deps_extracted/

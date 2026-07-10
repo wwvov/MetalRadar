@@ -95,15 +95,43 @@ async function main() {
 
   // ===== 2.5 更新函数配置：设置环境变量 =====
   console.log(`⚙️  更新函数配置...`);
+
+  // 构建环境变量列表（从部署环境变量传入，避免覆盖控制台手动配置）
+  const envVariables = [
+    { Key: "DATABASE_URL", Value: "sqlite:////tmp/metalradar.db" },
+  ];
+
+  // LLM API Key（通过部署命令传入，不写死在代码中）
+  if (process.env.LLM_API_KEY) {
+    envVariables.push({ Key: "LLM_API_KEY", Value: process.env.LLM_API_KEY });
+    console.log(`   ✅ LLM_API_KEY 已配置`);
+  } else {
+    console.log(`   ⚠️  未设置 LLM_API_KEY，AI 功能将不可用`);
+  }
+
+  if (process.env.LLM_BASE_URL) {
+    envVariables.push({ Key: "LLM_BASE_URL", Value: process.env.LLM_BASE_URL });
+  }
+
+  if (process.env.LLM_MODEL) {
+    envVariables.push({ Key: "LLM_MODEL", Value: process.env.LLM_MODEL });
+  }
+
+  // CORS 允许的来源（逗号分隔，支持自定义域名）
+  if (process.env.CORS_ORIGINS) {
+    envVariables.push({ Key: "CORS_ORIGINS", Value: process.env.CORS_ORIGINS });
+    console.log(`   ✅ CORS_ORIGINS: ${process.env.CORS_ORIGINS}`);
+  } else {
+    console.log(`   ⚠️  未设置 CORS_ORIGINS，仅允许本地开发来源`);
+  }
+
   const configResult = await client.UpdateFunctionConfiguration({
     FunctionName: FUNCTION_NAME,
     Environment: {
-      Variables: [
-        { Key: "DATABASE_URL", Value: "sqlite:////tmp/metalradar.db" },
-      ],
+      Variables: envVariables,
     },
   });
-  console.log(`✅ 函数配置已更新 (DATABASE_URL=/tmp/metalradar.db)`);
+  console.log(`✅ 函数配置已更新 (${envVariables.length} 个环境变量)`);
   console.log(`   RequestId: ${configResult.RequestId}`);
 
   // ===== 3. 清理 COS 上的旧部署包（保留最近 3 个）=====

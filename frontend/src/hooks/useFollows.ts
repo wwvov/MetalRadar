@@ -3,7 +3,7 @@ import { userService } from '@/services/userService'
 import { useWatchlist } from '@/providers'
 
 export function useFollows() {
-  const { setFollows } = useWatchlist()
+  const { setFollows, markHydrated } = useWatchlist()
   const queryClient = useQueryClient()
 
   const followsQuery = useQuery({
@@ -11,6 +11,7 @@ export function useFollows() {
     queryFn: async () => {
       const data = await userService.getFollows()
       setFollows(data)
+      markHydrated()
       return data
     },
   })

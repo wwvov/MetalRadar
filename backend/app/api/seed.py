@@ -49,12 +49,26 @@ def seed_sprint1(db: Session = Depends(get_db)):
     ]
     for c_data in companies_data:
         materials = c_data.pop("materials")
-        c = Company(**c_data)
-        db.add(c)
-        db.flush()
+        # 幂等：存在则更新，不存在则创建
+        existing = db.query(Company).filter(Company.id == c_data["id"]).first()
+        if existing:
+            for k, v in c_data.items():
+                setattr(existing, k, v)
+        else:
+            c = Company(**c_data)
+            db.add(c)
+            db.flush()
+        # 清除旧材料并重新插入（幂等）
+        db.query(CompanyMaterial).filter(CompanyMaterial.company_id == c_data["id"]).delete()
         for m in materials:
-            db.add(CompanyMaterial(company_id=c.id, **m))
-        db.add(UserFollow(user_id=DEFAULT_USER, company_id=c.id))
+            db.add(CompanyMaterial(company_id=c_data["id"], **m))
+        # 关注记录幂等
+        existing_follow = db.query(UserFollow).filter(
+            UserFollow.user_id == DEFAULT_USER,
+            UserFollow.company_id == c_data["id"],
+        ).first()
+        if not existing_follow:
+            db.add(UserFollow(user_id=DEFAULT_USER, company_id=c_data["id"]))
 
     # (title, summary, source, companies, metals, event_type, emotion, tags)
     macro_panel = [

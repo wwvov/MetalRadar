@@ -57,7 +57,7 @@ export interface DashboardMaterial {
   ytd_change_pct: number | null
 }
 
-export interface DashboardData {
+export interface FuturesDashboardData {
   company: {
     id: string
     name: string
@@ -69,7 +69,7 @@ export interface DashboardData {
 
 export interface DashboardResponse {
   ok: boolean
-  data: DashboardData
+  data: FuturesDashboardData
 }
 
 // ---- 跨公司概览 ----

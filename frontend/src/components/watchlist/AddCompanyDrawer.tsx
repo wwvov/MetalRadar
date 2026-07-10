@@ -260,17 +260,25 @@ export function AddCompanyDrawer() {
                           if (!alreadyFollowing) setSelectedCompany(company)
                         }}
                       >
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
                             <Building2 className="w-4 h-4 text-slate-500" />
                           </div>
-                          <div>
-                            <p className="text-sm font-semibold text-slate-800">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-slate-800 truncate">
                               {company.name}
                             </p>
                             <p className="text-xs text-slate-500 font-mono">
                               {company.id}
+                              {company.industry && (
+                                <span className="text-slate-400 ml-1.5">· {company.industry}</span>
+                              )}
                             </p>
+                            {company.business_desc && (
+                              <p className="text-xs text-slate-400 mt-0.5 truncate max-w-[280px]">
+                                {company.business_desc}
+                              </p>
+                            )}
                           </div>
                         </div>
                         {alreadyFollowing ? (
@@ -310,9 +318,17 @@ export function AddCompanyDrawer() {
             <div className="space-y-4">
               <div className="bg-emerald-50 rounded-lg p-4 flex items-start gap-3">
                 <Building2 className="w-5 h-5 text-emerald-600 mt-0.5 shrink-0" />
-                <div>
+                <div className="min-w-0">
                   <p className="text-sm font-semibold text-emerald-900">{selectedCompany.name}</p>
-                  <p className="text-xs text-emerald-700 font-mono">{selectedCompany.id}</p>
+                  <p className="text-xs text-emerald-700 font-mono">
+                    {selectedCompany.id}
+                    {selectedCompany.industry && (
+                      <span className="text-emerald-600 ml-1.5">· {selectedCompany.industry}</span>
+                    )}
+                  </p>
+                  {selectedCompany.business_desc && (
+                    <p className="text-xs text-emerald-700 mt-0.5 line-clamp-2">{selectedCompany.business_desc}</p>
+                  )}
                 </div>
               </div>
 

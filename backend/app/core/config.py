@@ -8,6 +8,7 @@
 
 import os
 import logging
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
@@ -75,8 +76,17 @@ class Settings(BaseSettings):
     LLM_BASE_URL: str = "https://api.openai.com/v1"
     LLM_MODEL: str = "gpt-4o-mini"
 
-    # CORS
+    # CORS — 支持逗号分隔的环境变量
+    # 示例: CORS_ORIGINS=https://example.com,https://wwvov.github.io,http://localhost:5173
     CORS_ORIGINS: list[str] = ["http://localhost:5173"]
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v):
+        """将逗号分隔的字符串解析为列表，支持环境变量注入"""
+        if isinstance(v, str):
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
+        return v
 
     class Config:
         env_file = _find_env_file()

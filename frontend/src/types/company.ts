@@ -5,6 +5,7 @@ export interface CompanyBasic {
   name: string
   code: string
   industry: string
+  business_desc?: string
 }
 
 export interface CompanySearchResult {

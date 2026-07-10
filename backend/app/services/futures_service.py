@@ -4,13 +4,21 @@
 使用全局锁串行化 akshare 调用，与 stock_service 共用避免并发触发反爬。
 """
 
+from __future__ import annotations
 import json
 import logging
 import os
 import time
 from datetime import datetime, timezone, timedelta
+from typing import TYPE_CHECKING
 
-import pandas as pd
+try:
+    import pandas as pd
+except ImportError:
+    pd = None  # type: ignore
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 from app.core.config import settings
 from app.services._scrape_control import (
@@ -167,7 +175,7 @@ def _safe_col(row, candidates: list[str]):
     return None
 
 
-def _fetch_kline(symbol: str) -> pd.DataFrame:
+def _fetch_kline(symbol: str, cache_only: bool = False) -> pd.DataFrame:
     """获取单个品种主力合约全部历史K线（带缓存 + 线程安全反爬控制）
 
     这是所有期货数据的唯一入口。quote / percentile / history 均从此派生。
@@ -175,12 +183,20 @@ def _fetch_kline(symbol: str) -> pd.DataFrame:
     双数据源:
     1. futures_zh_daily_sina (优先) — 新浪日线，英文列名，更稳定
     2. futures_main_sina (回退) — 新浪主力合约，中文列名，兜底
+
+    cache_only=True: 仅使用缓存，缓存为空时返回空 DataFrame（不触发 akshare 调用）。
+    用于知识图谱等非实时场景，避免冷启动时耗时过长导致超时。
     """
     # 1. 检查缓存（锁外，快速路径）
     cached = _read_cache(symbol)
     if cached and "kline" in cached:
         logger.info(f"期货 {symbol} 命中缓存，{len(cached['kline'])} 条K线")
         return pd.DataFrame(cached["kline"])
+
+    # cache_only 模式：缓存为空直接返回空 DataFrame
+    if cache_only:
+        logger.info(f"期货 {symbol} 缓存未命中（cache_only 模式），跳过实时拉取")
+        return pd.DataFrame()
 
     # 2. 获取全局锁（与 stock_service 共用，串行化所有 akshare 调用）
     with acquire_lock():
@@ -262,14 +278,14 @@ def _get_unit(material_name: str) -> str:
     return ""
 
 
-def get_futures_quote(material_name: str, contract: str = "") -> dict | None:
+def get_futures_quote(material_name: str, contract: str = "", cache_only: bool = False) -> dict | None:
     """获取单个品种最新报价"""
     symbol = _get_symbol(material_name, contract)
     if not symbol:
         return None
 
     try:
-        df = _fetch_kline(symbol)
+        df = _fetch_kline(symbol, cache_only=cache_only)
         if df.empty:
             return None
         latest = df.iloc[-1]
@@ -295,14 +311,14 @@ def get_futures_quote(material_name: str, contract: str = "") -> dict | None:
         return None
 
 
-def get_futures_history(material_name: str, contract: str = "", days: int = 60) -> list[dict]:
+def get_futures_history(material_name: str, contract: str = "", days: int = 60, cache_only: bool = False) -> list[dict]:
     """获取近N日K线数据"""
     symbol = _get_symbol(material_name, contract)
     if not symbol:
         return []
 
     try:
-        df = _fetch_kline(symbol)
+        df = _fetch_kline(symbol, cache_only=cache_only)
         if df.empty:
             return []
         recent = df.tail(days)

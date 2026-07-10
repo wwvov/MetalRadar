@@ -42,7 +42,7 @@ export function CostPressureDashboard({
   onRetry,
   hasFinancialReport,
   companyId,
-  allMaterials,
+  allMaterials: _allMaterials,
 }: CostPressureDashboardProps) {
   // 本地成本占比状态 — key为material_name（仅用于前端展示，不持久化）
   const [costPctMap, setCostPctMap] = useState<Record<string, number>>({})

@@ -106,7 +106,14 @@ export function CompanyCard({ company, selected, onSelect, onEdit, onRemove, por
       </h4>
 
       {/* 股票代码 */}
-      <p className="text-[11px] text-slate-400 font-mono mb-2">{company.id}</p>
+      <p className="text-[11px] text-slate-400 font-mono mb-1.5">{company.id}</p>
+
+      {/* 主营业务简述 */}
+      {company.business_desc && (
+        <p className="text-[10px] text-slate-500 leading-tight mb-1.5 line-clamp-2" title={company.business_desc}>
+          {company.business_desc}
+        </p>
+      )}
 
       {/* 标签行 */}
       <div className="flex flex-wrap gap-1 mb-2">

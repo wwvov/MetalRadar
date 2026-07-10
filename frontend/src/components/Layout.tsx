@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { useFollows } from '@/hooks/useFollows'
+import { BackendStatusBanner } from './BackendStatus'
 import {
   Newspaper,
   Star,
@@ -24,6 +25,11 @@ export function Layout() {
 
   return (
     <div className="flex h-screen bg-green-50/30">
+      {/* 后端冷启动提示横幅 */}
+      <div className="absolute top-0 left-0 right-0 z-50">
+        <BackendStatusBanner />
+      </div>
+
       {/* 左侧导航 — 白色背景 + 深绿色强调 */}
       <aside className="w-56 bg-white flex flex-col shrink-0 border-r border-slate-200 shadow-sm">
         {/* Logo */}

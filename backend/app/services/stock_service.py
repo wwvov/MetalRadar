@@ -6,12 +6,20 @@
 - 财务数据: ak.stock_lrb_em / ak.stock_zcfz_em / ak.stock_xjll_em
 """
 
+from __future__ import annotations
 import json
 import logging
 import os
 import time
+from typing import TYPE_CHECKING
 
-import pandas as pd
+try:
+    import pandas as pd
+except ImportError:
+    pd = None  # type: ignore
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 from app.core.config import settings
 from app.services._scrape_control import (

@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect } from "react";
+import { useMemo, useEffect } from "react";
 import ReactFlow, {
   Background,
   Controls,
@@ -67,7 +67,7 @@ const CustomNode = ({ data }: { data: any }) => {
       medium: { bg: "bg-yellow-500", text: "text-white", label: "中" },
       high: { bg: "bg-red-500", text: "text-white", label: "高" }
     };
-    const config = riskConfig[item.risk_level];
+    const config = riskConfig[item.risk_level as keyof typeof riskConfig];
 
     riskBadge = (
       <div className={`absolute -top-2 -right-2 w-6 h-6 rounded-full ${config.bg} ${config.text} flex items-center justify-center text-xs font-bold shadow-md`}>

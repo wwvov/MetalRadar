@@ -104,11 +104,17 @@ def _load_stock_list() -> list[dict]:
         _stock_list_cache = file_cache
         return _stock_list_cache
 
-    # L3: 从 akshare 获取（仅此一处调用 akshare）
+    # L3: 从 akshare 获取（仅此一处调用 akshare，带反爬控制）
     try:
         import akshare as ak
+        from app.services._scrape_control import retry_with_backoff, cooldown, mark_fetch_time
         logger.info("Fetching full A-share stock list from akshare...")
-        df = ak.stock_info_a_code_name()
+        def _call():
+            cooldown()
+            result = ak.stock_info_a_code_name()
+            mark_fetch_time()
+            return result
+        df = retry_with_backoff(_call, max_retries=2, label="A股列表", source="eastmoney")
         _stock_list_cache = df.to_dict(orient="records")
         logger.info(f"Loaded {len(_stock_list_cache)} A-share stocks from akshare")
         _write_file_cache(_stock_list_cache)
@@ -121,7 +127,12 @@ def _load_stock_list() -> list[dict]:
 
 
 def search_companies(db: Session, keyword: str) -> CompanySearchResult:
-    """搜索 A 股公司 — 按名称或代码匹配（从 akshare 全量列表查询）"""
+    """搜索 A 股公司 — 按名称或代码匹配（从 akshare 全量列表查询）
+
+    结果会附带行业和主营业务信息：
+    - 行业：优先从 DB 已有记录取，其次从全市场行情缓存取
+    - 主营业务：从 DB 已有记录取（LLM 生成或用户编辑的）
+    """
     stock_list = _load_stock_list()
 
     # 模糊匹配
@@ -135,15 +146,54 @@ def search_companies(db: Session, keyword: str) -> CompanySearchResult:
         if len(matched) >= 20:
             break
 
-    companies = [
-        CompanyBasic(
-            id=str(s.get("code", "")),
-            name=str(s.get("name", "")),
-            code=str(s.get("code", "")),
-            industry="",
+    # 批量查询 DB 中已有记录的行业和主营业务
+    matched_codes = [str(s.get("code", "")) for s in matched]
+    db_companies: dict[str, Company] = {}
+    if matched_codes:
+        existing = db.query(Company).filter(Company.id.in_(matched_codes)).all()
+        db_companies = {c.id: c for c in existing}
+
+    # 尝试从全市场行情缓存获取行业（零额外API调用）
+    spot_industries: dict[str, str] = {}
+    try:
+        from app.services.stock_service import _get_spot_market_cache as _get_spot
+        spot_df = _get_spot()
+        if spot_df is not None:
+            for _, row in spot_df.iterrows():
+                code = str(row.get("代码", ""))
+                industry = str(row.get("所属行业", ""))
+                if code and industry and industry != "nan" and industry != "-":
+                    spot_industries[code] = industry
+    except Exception:
+        pass  # 非关键路径，静默失败
+
+    companies = []
+    for s in matched:
+        code = str(s.get("code", ""))
+        name = str(s.get("name", ""))
+        db_company = db_companies.get(code)
+
+        # 行业优先级: DB记录 > 全市场行情 > 空
+        industry = ""
+        if db_company and db_company.industry:
+            industry = db_company.industry
+        elif code in spot_industries:
+            industry = spot_industries[code]
+
+        # 主营业务: 从 DB 记录取
+        business_desc = ""
+        if db_company and db_company.business_desc:
+            business_desc = db_company.business_desc
+
+        companies.append(
+            CompanyBasic(
+                id=code,
+                name=name,
+                code=code,
+                industry=industry,
+                business_desc=business_desc,
+            )
         )
-        for s in matched
-    ]
 
     return CompanySearchResult(companies=companies)
 
@@ -613,7 +663,7 @@ def save_financial_report(
 
 
 def get_user_follows(db: Session, user_id: str) -> list[CompanyBasic]:
-    """获取用户关注的公司列表（含画像摘要）"""
+    """获取用户关注的公司列表（含行业和主营业务）"""
     follows = (
         db.query(UserFollow)
         .filter(UserFollow.user_id == user_id)
@@ -630,6 +680,7 @@ def get_user_follows(db: Session, user_id: str) -> list[CompanyBasic]:
                     name=company.name,
                     code=company.id,
                     industry=company.industry or "",
+                    business_desc=company.business_desc or "",
                 )
             )
         else:
@@ -640,6 +691,7 @@ def get_user_follows(db: Session, user_id: str) -> list[CompanyBasic]:
                     name=f.company_id,
                     code=f.company_id,
                     industry="",
+                    business_desc="",
                 )
             )
 

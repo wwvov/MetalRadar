@@ -3,7 +3,7 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useQueryClient } from '@tanstack/react-query'
 import { companyService } from '@/services/companyService'
-import { Upload, FileText, Loader2, AlertCircle, CheckCircle, X } from 'lucide-react'
+import { Upload, FileText, Loader2, AlertCircle, CheckCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface ReportUploadProps {

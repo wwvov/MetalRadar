@@ -164,13 +164,14 @@ def get_knowledge_graph(
                     material_id = f"material_{material_name.replace(' ', '_')}"
                     
                     if material_id not in material_ids_seen:
-                        # Get futures data
+                        # Get futures data — cache_only 模式，避免冷启动时
+                        # 串行 akshare 调用耗时过长导致 API 超时
                         quote = None
                         history = []
                         unit = ""
                         try:
-                            quote = get_futures_quote(material_name, cm.contract or "")
-                            history = get_futures_history(material_name, cm.contract or "", days=30)
+                            quote = get_futures_quote(material_name, cm.contract or "", cache_only=True)
+                            history = get_futures_history(material_name, cm.contract or "", days=30, cache_only=True)
                             unit = _get_unit(material_name)
                         except Exception as e:
                             logger.error(f"Failed to get futures for {material_name}: {e}")

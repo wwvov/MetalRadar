@@ -7,13 +7,26 @@ import os
 import time
 from datetime import datetime, timezone, timedelta
 
-import pandas as pd
-
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.news import News
 from app.services._scrape_control import retry_with_backoff, acquire_lock
 from sqlalchemy.orm import Session
+from datetime import datetime
+
+
+def _parse_pub_time(pub_time_raw) -> datetime | None:
+    """解析发布时间字符串（优先 pandas，fallback datetime）"""
+    if pub_time_raw is None:
+        return None
+    try:
+        import pandas as pd
+        return pd.Timestamp(pub_time_raw).to_pydatetime()
+    except Exception:
+        try:
+            return datetime.fromisoformat(str(pub_time_raw))
+        except Exception:
+            return None
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +100,7 @@ def _fetch_shmet_news() -> list[dict]:
         logger.info("正在从 akshare 获取上海金属网新闻...")
         def _call():
             return ak.futures_news_shmet()
-        df = retry_with_backoff(_call, max_retries=2, label="上海金属网新闻")
+        df = retry_with_backoff(_call, max_retries=2, label="上海金属网新闻", source="shmet")
         if df is None or df.empty:
             logger.warning("上海金属网新闻返回空数据")
             return []
@@ -112,7 +125,7 @@ def _fetch_shmet_news() -> list[dict]:
             pub_time = None
             if pub_time_raw:
                 try:
-                    pub_time = pd.Timestamp(pub_time_raw).to_pydatetime()
+                    pub_time = _parse_pub_time(pub_time_raw)
                 except Exception:
                     pass
 
@@ -140,7 +153,7 @@ def _fetch_eastmoney_global() -> list[dict]:
         logger.info("正在从 akshare 获取东方财富全球快讯...")
         def _call():
             return ak.stock_info_global_em()
-        df = retry_with_backoff(_call, max_retries=2, label="东方财富全球快讯")
+        df = retry_with_backoff(_call, max_retries=2, label="东方财富全球快讯", source="eastmoney")
         if df is None or df.empty:
             logger.warning("东方财富全球快讯返回空数据")
             return []
@@ -156,7 +169,7 @@ def _fetch_eastmoney_global() -> list[dict]:
             pub_time = None
             if pub_time_raw:
                 try:
-                    pub_time = pd.Timestamp(pub_time_raw).to_pydatetime()
+                    pub_time = _parse_pub_time(pub_time_raw)
                 except Exception:
                     pass
 
@@ -184,7 +197,7 @@ def _fetch_sina_global() -> list[dict]:
         logger.info("正在从 akshare 获取新浪全球快讯...")
         def _call():
             return ak.stock_info_global_sina()
-        df = retry_with_backoff(_call, max_retries=2, label="新浪全球快讯")
+        df = retry_with_backoff(_call, max_retries=2, label="新浪全球快讯", source="sina")
         if df is None or df.empty:
             logger.warning("新浪全球快讯返回空数据")
             return []
@@ -202,7 +215,7 @@ def _fetch_sina_global() -> list[dict]:
             pub_time = None
             if pub_time_raw:
                 try:
-                    pub_time = pd.Timestamp(pub_time_raw).to_pydatetime()
+                    pub_time = _parse_pub_time(pub_time_raw)
                 except Exception:
                     pass
 

@@ -10,6 +10,7 @@ class CompanyBasic(BaseModel):
     name: str
     code: str
     industry: str = ""
+    business_desc: str = ""
 
     class Config:
         from_attributes = True

@@ -14,7 +14,7 @@ export default function App() {
     <QueryProvider>
       <TooltipProvider>
         <WatchlistProvider>
-          <BrowserRouter>
+          <BrowserRouter basename={import.meta.env.BASE_URL}>
             <Routes>
               <Route element={<Layout />}>
                 <Route path="/" element={<HomePage />} />
