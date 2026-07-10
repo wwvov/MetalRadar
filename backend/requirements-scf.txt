@@ -1,0 +1,17 @@
+# MetalRadar SCF deployment dependencies
+# Includes akshare for data fetching (includes numpy/pandas)
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+sqlalchemy
+httpx
+aiofiles
+openai
+python-multipart
+PyPDF2
+python-dotenv
+exceptiongroup
+akshare
+numpy
+pandas
