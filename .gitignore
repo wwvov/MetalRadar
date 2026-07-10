@@ -44,15 +44,14 @@ frontend/dist/
 .DS_Store
 Thumbs.db
 
-# Environment
+# Environment (secrets)
 .env
 .env.local
-.env.production
 .env.development
 backend/.env
 frontend/.env
 frontend/.env.local
-frontend/.env.production
+# .env.production is production build config — OK to commit
 
 # Test coverage
 .coverage
@@ -77,3 +76,7 @@ backend/_jsonpath_temp*/
 backend/_jsonpath_wheel/
 backend/_linux_deps*/
 backend/_linux_deps_extracted/
+
+# Deploy scripts with secrets (template only, do NOT commit)
+deploy.bat
+deploy-backend.bat

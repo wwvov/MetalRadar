@@ -1,0 +1,20 @@
+@echo off
+REM ===== MetalRadar Backend Deploy =====
+REM 复制此文件为 deploy-backend.bat，填入你的密钥后使用
+
+echo ===== MetalRadar Backend Deploy =====
+echo.
+
+set METALRADAR_DATABASE_URL=your_supabase_connection_string
+set TENCENT_SECRET_ID=your_tencent_secret_id
+set TENCENT_SECRET_KEY=your_tencent_secret_key
+set LLM_API_KEY=your_llm_api_key
+set LLM_BASE_URL=https://api.deepseek.com/v1
+set LLM_MODEL=deepseek-chat
+set CORS_ORIGINS=https://wwvov.github.io,http://localhost:5173
+
+node deploy/update-scf.js
+
+echo.
+echo Done!
+pause

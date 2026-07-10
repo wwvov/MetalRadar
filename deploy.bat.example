@@ -1,0 +1,56 @@
+@echo off
+REM ===== MetalRadar Deploy Script =====
+REM 复制此文件为 deploy.bat，填入你的密钥后使用
+REM Run this from the project root
+
+echo.
+echo [1/2] Deploying frontend to GitHub Pages...
+
+REM Copy dist to temp
+if exist "%TEMP%\metalradar-deploy" rmdir /s /q "%TEMP%\metalradar-deploy"
+mkdir "%TEMP%\metalradar-deploy"
+xcopy /e /y "frontend\dist\*" "%TEMP%\metalradar-deploy\"
+
+REM Switch to gh-pages
+git checkout gh-pages
+if %ERRORLEVEL% NEQ 0 (
+    echo Failed to checkout gh-pages branch
+    exit /b 1
+)
+
+REM Clean gh-pages root (keep .git and CNAME)
+for /f "delims=" %%i in ('dir /b /a') do (
+    if not "%%i"==".git" if not "%%i"=="CNAME" (
+        rd /s /q "%%i" 2>nul || del /q "%%i" 2>nul
+    )
+)
+
+REM Copy dist to root
+xcopy /e /y "%TEMP%\metalradar-deploy\*" .
+rmdir /s /q "%TEMP%\metalradar-deploy"
+
+REM Commit and push
+git add .
+git commit -m "deploy: frontend update %date% %time%"
+git push origin gh-pages
+git checkout master
+
+echo [1/2] Frontend deployed!
+
+echo.
+echo [2/2] Deploying backend to SCF...
+
+set METALRADAR_DATABASE_URL=your_supabase_connection_string
+set TENCENT_SECRET_ID=your_tencent_secret_id
+set TENCENT_SECRET_KEY=your_tencent_secret_key
+set LLM_API_KEY=your_llm_api_key
+set LLM_BASE_URL=https://api.deepseek.com/v1
+set LLM_MODEL=deepseek-chat
+set CORS_ORIGINS=https://wwvov.github.io,http://localhost:5173
+
+node deploy/update-scf.js
+
+echo.
+echo [2/2] Backend deployed!
+echo.
+echo All done! Open https://wwvov.github.io/MetalRadar/ to verify.
