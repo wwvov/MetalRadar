@@ -93,7 +93,29 @@ async function main() {
   console.log(`✅ SCF 函数代码已更新: ${FUNCTION_NAME}`);
   console.log(`   RequestId: ${result.RequestId}`);
 
-  // ===== 2.5 更新函数配置：设置环境变量 =====
+  // ===== 2.5 等待函数状态恢复为 Active =====
+  console.log(`⏳ 等待函数状态就绪...`);
+  let statusReady = false;
+  for (let i = 0; i < 12; i++) {
+    await new Promise(r => setTimeout(r, 5000)); // 每 5 秒检查一次
+    try {
+      const statusResult = await client.GetFunction({ FunctionName: FUNCTION_NAME });
+      const status = statusResult.Status;
+      if (status === 'Active') {
+        console.log(`   ✅ 函数状态: ${status}`);
+        statusReady = true;
+        break;
+      }
+      console.log(`   ⏳ 函数状态: ${status}，继续等待...`);
+    } catch (e) {
+      console.log(`   ⚠️  查询状态失败: ${e.message}，继续等待...`);
+    }
+  }
+  if (!statusReady) {
+    console.log(`   ⚠️  等待超时，仍尝试更新配置...`);
+  }
+
+  // ===== 2.6 更新函数配置：设置环境变量 =====
   console.log(`⚙️  更新函数配置...`);
 
   // 构建环境变量列表（从部署环境变量传入，避免覆盖控制台手动配置）
@@ -125,14 +147,29 @@ async function main() {
     console.log(`   ⚠️  未设置 CORS_ORIGINS，仅允许本地开发来源`);
   }
 
-  const configResult = await client.UpdateFunctionConfiguration({
-    FunctionName: FUNCTION_NAME,
-    Environment: {
-      Variables: envVariables,
-    },
-  });
-  console.log(`✅ 函数配置已更新 (${envVariables.length} 个环境变量)`);
-  console.log(`   RequestId: ${configResult.RequestId}`);
+  // 带重试的配置更新（可能因函数仍在 Updating 而失败）
+  let configUpdated = false;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const configResult = await client.UpdateFunctionConfiguration({
+        FunctionName: FUNCTION_NAME,
+        Environment: {
+          Variables: envVariables,
+        },
+      });
+      console.log(`✅ 函数配置已更新 (${envVariables.length} 个环境变量)`);
+      console.log(`   RequestId: ${configResult.RequestId}`);
+      configUpdated = true;
+      break;
+    } catch (e) {
+      if (attempt < 4) {
+        console.log(`   ⚠️  配置更新失败 (${e.message})，${5 * (attempt + 1)}s 后重试...`);
+        await new Promise(r => setTimeout(r, 5000 * (attempt + 1)));
+      } else {
+        throw e;
+      }
+    }
+  }
 
   // ===== 3. 清理 COS 上的旧部署包（保留最近 3 个）=====
   console.log("\n🧹 清理旧部署包...");
